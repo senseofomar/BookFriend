@@ -30,9 +30,8 @@ state = AppState()
 
 # === Helper: Load a specific book ===
 def load_book_index(book_id: str, index_path: str):
-    """Loads a specific book's index into memory if not already present."""
     if book_id in state.indices:
-        return  # Already loaded
+        return
 
     if not os.path.exists(index_path):
         print(f"⚠️ Index missing for {book_id}")
