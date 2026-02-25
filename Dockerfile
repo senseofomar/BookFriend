@@ -27,6 +27,8 @@ RUN mkdir -p /app/bookfriend
 # 8. Expose the port the app runs on
 EXPOSE 8000
 
-# 9. Command to run the application
-# Note: We navigate to bookfriend package to run it
-CMD ["uvicorn", "bookfriend.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# 9. "cd" into the correct folder where api.py lives
+WORKDIR /app/bookfriend
+
+# 10. Run the application exactly like you did locally
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
