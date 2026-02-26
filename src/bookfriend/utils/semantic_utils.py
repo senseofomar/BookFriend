@@ -1,50 +1,75 @@
-import faiss
-import pickle
-from sentence_transformers import SentenceTransformer
 import os
+from sentence_transformers import SentenceTransformer
+from pinecone import Pinecone
+from dotenv import load_dotenv
 
-# Load model only once (Global cache)
+load_dotenv()
+
+print("🧠 Loading embedding model...")
+# Load model globally so it only initializes once
 SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
 
-def load_semantic_index_from_path(index_path):
-    """
-    Loads FAISS index and mapping from a specific path.
-    """
-    if not os.path.exists(index_path):
-        raise FileNotFoundError(f"Index not found at {index_path}")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+if not PINECONE_API_KEY:
+    raise ValueError("CRITICAL: PINECONE_API_KEY is not set in .env")
 
-    index = faiss.read_index(index_path)
-
-    # Derive mapping path from index path (e.g. index_123.faiss -> index_123.pkl)
-    mapping_path = index_path.replace(".faiss", ".pkl")
-
-    if os.path.exists(mapping_path):
-        with open(mapping_path, 'rb') as f:
-            mapping = pickle.load(f)
-    else:
-        mapping = []
-        print(f"⚠️ Warning: No mapping file found at {mapping_path}")
-
-    return index, mapping
+# Connect to Pinecone
+print("☁️ Connecting to Pinecone...")
+pc = Pinecone(api_key=PINECONE_API_KEY)
+INDEX_NAME = "bookfriend-index"
+pinecone_index = pc.Index(INDEX_NAME)
 
 
-def semantic_search(query, index, mapping, top_k=5):
-    """Perform semantic search on the FAISS index."""
-    query_vec = SEM_MODEL.encode([query], convert_to_numpy=True)
-    distances, indices = index.search(query_vec, top_k)
-    results = []
-    for idx, dist in zip(indices[0], distances[0]):
-        if idx < len(mapping):
-            entry = mapping[idx]
+def upsert_book_to_pinecone(book_id: str, chunks: list, chapters: list):
+    """Embeds chunks and pushes them to the Pinecone cloud."""
+    vectors = []
+    print(f"🚀 Preparing {len(chunks)} chunks for Pinecone upload...")
 
-            # === 🛡️ FIX: Handle Dictionary Format ===
-            if isinstance(entry, dict):
-                filename = entry.get("file", "unknown")
-                chunk = entry.get("text", "")
-            else:
-                # Fallback for old Tuple format (filename, chunk)
-                filename, chunk = entry
+    # Generate embeddings for all chunks at once (much faster)
+    embeddings = SEM_MODEL.encode(chunks, convert_to_numpy=True).tolist()
 
-            results.append((filename, chunk, dist))
+    for i, (chunk, chapter, emb) in enumerate(zip(chunks, chapters, embeddings)):
+        chunk_id = f"{book_id}_{i}"
 
-    return results
+        # Metadata is how we filter later!
+        metadata = {
+            "book_id": book_id,
+            "chapter": chapter,
+            "text": chunk
+        }
+
+        vectors.append((chunk_id, emb, metadata))
+
+    # Batch upload (100 at a time)
+    batch_size = 100
+    for i in range(0, len(vectors), batch_size):
+        batch = vectors[i: i + batch_size]
+        pinecone_index.upsert(vectors=batch)
+
+    print(f"✅ Successfully uploaded {len(chunks)} vectors to Pinecone for book {book_id}")
+
+
+def semantic_search(query: str, book_id: str, chapter_limit: int = None, top_k: int = 5):
+    """Queries Pinecone directly using metadata filters."""
+    query_vec = SEM_MODEL.encode([query], convert_to_numpy=True).tolist()[0]
+
+    # The Spoiler Shield Filter 🛡️
+    filter_dict = {"book_id": {"$eq": book_id}}
+    if chapter_limit is not None:
+        filter_dict["chapter"] = {"$lte": chapter_limit}
+
+    results = pinecone_index.query(
+        vector=query_vec,
+        top_k=top_k,
+        include_metadata=True,
+        filter=filter_dict
+    )
+
+    # Format the results to match what our answer generator expects
+    formatted_results = []
+    for match in results.get('matches', []):
+        meta = match['metadata']
+        # We mock the filename format just to keep the answer generator happy for now
+        formatted_results.append((f"chapter_{meta['chapter']}", meta['text'], match['score']))
+
+    return formatted_results
