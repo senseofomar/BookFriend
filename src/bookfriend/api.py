@@ -3,7 +3,7 @@ import shutil
 import sys
 import subprocess
 from sqlalchemy import text
-import database
+import models
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import List, Dict, Any
