@@ -8,3 +8,4 @@ google-generativeai
 groq
 python-multipart
 psycopg2-binary
+pinecone-client
