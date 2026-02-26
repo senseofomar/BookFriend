@@ -2,6 +2,8 @@ import os
 import shutil
 import sys
 import subprocess
+from sqlalchemy import text
+import database
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import List, Dict, Any
@@ -50,11 +52,22 @@ def load_book_index(book_id: str, index_path: str):
 
 @app.on_event("startup")
 def startup_event():
+    # 1. Initialize the tables (which you already fixed)
     database.init_db()
-    # Reload all registered books from DB
-    conn = database.get_db()
-    books = conn.execute("SELECT id, index_path FROM books").fetchall()
-    conn.close()
+
+    # 2. Manually grab the session out of the generator
+    db_generator = database.get_db()
+    conn = next(db_generator)
+
+    try:
+        # 3. SQLAlchemy requires raw SQL strings to be wrapped in text()
+        books = conn.execute(text("SELECT id, index_path FROM books")).fetchall()
+
+        # ... the rest of your startup logic for loading FAISS indexes ...
+
+    finally:
+        # Always close the connection when doing manual generation
+        conn.close()
 
     for b in books:
         load_book_index(b["id"], b["index_path"])
