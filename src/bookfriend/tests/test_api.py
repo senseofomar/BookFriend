@@ -5,6 +5,8 @@ All external calls are mocked.
 """
 
 import io
+
+import patch
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
@@ -235,10 +237,10 @@ def test_query_returns_answer():
     app.dependency_overrides[database.get_db] = lambda: mock_db
 
     with patch("database.get_chat_history", return_value=[]), \
-         patch("utils.semantic_utils.semantic_search", return_value=[
+         patch("api.semantic_search", return_value=[          # ← was utils.semantic_utils.semantic_search
              ("chapter_1", "Klein Moretti is the protagonist.", 0.95)
          ]), \
-         patch("utils.answer_generator.generate_answer", return_value="Klein Moretti is the main character."), \
+         patch("api.generate_answer", return_value="Klein Moretti is the main character."), \  # ← was utils.answer_generator.generate_answer
          patch("database.log_message"):
 
         response = client.post(
