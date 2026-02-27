@@ -1,75 +1,88 @@
-import os
 from sentence_transformers import SentenceTransformer
-from pinecone import Pinecone
+from sqlalchemy import text
 from dotenv import load_dotenv
+import database
 
 load_dotenv()
 
 print("🧠 Loading embedding model...")
-# Load model globally so it only initializes once
 SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
 
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-if not PINECONE_API_KEY:
-    raise ValueError("CRITICAL: PINECONE_API_KEY is not set in .env")
 
-# Connect to Pinecone
-print("☁️ Connecting to Pinecone...")
-pc = Pinecone(api_key=PINECONE_API_KEY)
-INDEX_NAME = "bookfriend-index"
-pinecone_index = pc.Index(INDEX_NAME)
+def upsert_book_to_supabase(book_id: str, chunks: list, chapters: list):
+    """Embeds chunks and pushes them directly to Supabase pgvector."""
+    print(f"🚀 Preparing {len(chunks)} chunks for Supabase upload...")
 
-
-def upsert_book_to_pinecone(book_id: str, chunks: list, chapters: list):
-    """Embeds chunks and pushes them to the Pinecone cloud."""
-    vectors = []
-    print(f"🚀 Preparing {len(chunks)} chunks for Pinecone upload...")
-
-    # Generate embeddings for all chunks at once (much faster)
+    # Generate embeddings
     embeddings = SEM_MODEL.encode(chunks, convert_to_numpy=True).tolist()
 
-    for i, (chunk, chapter, emb) in enumerate(zip(chunks, chapters, embeddings)):
-        chunk_id = f"{book_id}_{i}"
+    db = database.SessionLocal()
+    try:
+        # Batch insert using raw SQL for maximum speed
+        query = text("""
+                     INSERT INTO book_chunks (book_id, chapter_num, chunk_text, embedding)
+                     VALUES (:book_id, :chapter_num, :chunk_text, :embedding)
+                     """)
 
-        # Metadata is how we filter later!
-        metadata = {
-            "book_id": book_id,
-            "chapter": chapter,
-            "text": chunk
-        }
+        params = [
+            {
+                "book_id": book_id,
+                "chapter_num": chapter,
+                "chunk_text": chunk,
+                "embedding": str(emb)  # pgvector accepts string representation of arrays
+            }
+            for chunk, chapter, emb in zip(chunks, chapters, embeddings)
+        ]
 
-        vectors.append((chunk_id, emb, metadata))
-
-    # Batch upload (100 at a time)
-    batch_size = 100
-    for i in range(0, len(vectors), batch_size):
-        batch = vectors[i: i + batch_size]
-        pinecone_index.upsert(vectors=batch)
-
-    print(f"✅ Successfully uploaded {len(chunks)} vectors to Pinecone for book {book_id}")
+        db.execute(query, params)
+        db.commit()
+        print(f"✅ Successfully uploaded {len(chunks)} vectors to Supabase for book {book_id}")
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error uploading to Supabase: {e}")
+        raise e
+    finally:
+        db.close()
 
 
 def semantic_search(query: str, book_id: str, chapter_limit: int = None, top_k: int = 5):
-    """Queries Pinecone directly using metadata filters."""
+    """Queries Supabase pgvector directly using cosine distance (<=>)."""
     query_vec = SEM_MODEL.encode([query], convert_to_numpy=True).tolist()[0]
 
-    # The Spoiler Shield Filter 🛡️
-    filter_dict = {"book_id": {"$eq": book_id}}
-    if chapter_limit is not None:
-        filter_dict["chapter"] = {"$lte": chapter_limit}
+    db = database.SessionLocal()
+    try:
+        # EXACTLY the query your friend designed, complete with the Spoiler Shield!
+        if chapter_limit is not None:
+            sql = text("""
+                       SELECT chunk_text,
+                              chapter_num,
+                              1 - (embedding <=> :embedding) AS similarity_score
+                       FROM book_chunks
+                       WHERE book_id = :book_id
+                         AND chapter_num <= :chapter_limit
+                       ORDER BY embedding <=> :embedding
+                LIMIT :top_k
+                       """)
+            params = {"embedding": str(query_vec), "book_id": book_id, "chapter_limit": chapter_limit, "top_k": top_k}
+        else:
+            sql = text("""
+                       SELECT chunk_text,
+                              chapter_num,
+                              1 - (embedding <=> :embedding) AS similarity_score
+                       FROM book_chunks
+                       WHERE book_id = :book_id
+                       ORDER BY embedding <=> :embedding
+                LIMIT :top_k
+                       """)
+            params = {"embedding": str(query_vec), "book_id": book_id, "top_k": top_k}
 
-    results = pinecone_index.query(
-        vector=query_vec,
-        top_k=top_k,
-        include_metadata=True,
-        filter=filter_dict
-    )
+        results = db.execute(sql, params).mappings().fetchall()
 
-    # Format the results to match what our answer generator expects
-    formatted_results = []
-    for match in results.get('matches', []):
-        meta = match['metadata']
-        # We mock the filename format just to keep the answer generator happy for now
-        formatted_results.append((f"chapter_{meta['chapter']}", meta['text'], match['score']))
+        # Format for your generate_answer function
+        formatted_results = []
+        for row in results:
+            formatted_results.append((f"chapter_{row['chapter_num']}", row['chunk_text'], row['similarity_score']))
 
-    return formatted_results
+        return formatted_results
+    finally:
+        db.close()
