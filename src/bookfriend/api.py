@@ -1,38 +1,42 @@
 import os
 import shutil
 import uuid
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Header
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
+from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-# Load secrets
 load_dotenv()
 
-# Import core logic
 from utils.semantic_utils import semantic_search
 from utils.answer_generator import generate_answer
 import database
 import models
 from ingest import process_and_ingest_pdf
 
-# === Setup App ===
+# ── API Key Security ──────────────────────────────────────────────────────────
+BOOKFRIEND_API_KEY = os.getenv("BOOKFRIEND_API_KEY")
+
+def verify_api_key(x_api_key: Optional[str] = Header(None)):
+    if not BOOKFRIEND_API_KEY:
+        raise HTTPException(status_code=500, detail="Server misconfiguration: BOOKFRIEND_API_KEY not set.")
+    if x_api_key != BOOKFRIEND_API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing X-API-Key header.")
+
+# ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="BookFriend API",
-    version="3.0 (Cloud Serverless Edition)"
+    version="3.0 (Supabase + pgvector Edition)"
 )
 
 @app.on_event("startup")
 def startup_event():
-    # Initialize the tables in Supabase.
-    # Because 'models' is imported, SQLAlchemy knows what to build.
     database.init_db()
     print("✅ Application startup complete. Connected to Supabase.")
-    # Notice we deleted all the FAISS loading logic here! 🧠
 
-# === API Models ===
-
+# ── Models ────────────────────────────────────────────────────────────────────
 class IngestResponse(BaseModel):
     message: str
     book_id: str
@@ -53,71 +57,51 @@ class BookListResponse(BaseModel):
     title: str
     filename: str
 
-# === Endpoints ===
-
+# ── Public Endpoints ──────────────────────────────────────────────────────────
 @app.get("/health")
 def health_check():
-    return {"status": "online", "db": "connected"}
+    return {"status": "online", "version": "3.0", "vector_db": "supabase-pgvector"}
 
-@app.get("/v1/books", response_model=List[BookListResponse])
-def list_books():
-    """Returns a list of all ingested books so the frontend knows what IDs to use."""
-    db_generator = database.get_db()
-    conn = next(db_generator)
-    try:
-        # Wrapped in text() and using .mappings() to fix SQLAlchemy 2.0 errors
-        rows = conn.execute(text("SELECT id, title, filename FROM books")).mappings().fetchall()
-    finally:
-        conn.close()
+# ── Protected Endpoints ───────────────────────────────────────────────────────
+@app.get("/v1/books", response_model=List[BookListResponse], dependencies=[Depends(verify_api_key)])
+def list_books(db: Session = Depends(database.get_db)):
+    rows = db.execute(text("SELECT id, title, filename FROM books")).mappings().fetchall()
+    return [{"id": r["id"], "title": r["title"], "filename": r["filename"]} for r in rows]
 
-    return [
-        {"id": r["id"], "title": r["title"], "filename": r["filename"]}
-        for r in rows
-    ]
 
-@app.post("/v1/ingest", response_model=IngestResponse)
+@app.post("/v1/ingest", response_model=IngestResponse, dependencies=[Depends(verify_api_key)])
 def ingest_book(file: UploadFile = File(...)):
     safe_filename = file.filename.replace(" ", "_")
+    pdf_path = f"/tmp/temp_{uuid.uuid4().hex[:8]}.pdf"
 
-    # Save PDF temporarily to disk just so PyPDF can read it
-    pdf_path = f"temp_{uuid.uuid4().hex[:8]}.pdf"
     with open(pdf_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     print(f"⚙️ Processing Book ({safe_filename})...")
 
     try:
-        # 1. Register in Supabase first to get our unique book_id
-        # We pass "pinecone" as the index path because local files are gone!
         book_id = database.register_book(
             title=file.filename,
             filename=safe_filename,
-            index_path="pinecone"
+            index_path="supabase-pgvector"   # Fixed: was saying "pinecone"
         )
-
-        # 2. Extract, Chunk, and Push to Pinecone directly in Python (No more subprocess!)
         process_and_ingest_pdf(pdf_path, book_id)
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
     finally:
-        # Clean up the temporary PDF. The server leaves no trace behind!
         if os.path.exists(pdf_path):
             os.remove(pdf_path)
 
-    return {"message": "Book Processed and Pushed to Pinecone", "book_id": book_id, "title": file.filename}
+    return {"message": "Book processed and stored in Supabase pgvector", "book_id": book_id, "title": file.filename}
 
-@app.post("/v1/query", response_model=QueryResponse)
+
+@app.post("/v1/query", response_model=QueryResponse, dependencies=[Depends(verify_api_key)])
 def query_book(req: QueryRequest):
-    # 1. History & Search
     history = database.get_chat_history(req.user_id, req.book_id)
 
     class MemoryWrapper:
         def get_context(self, limit=6): return history
 
-    memory_mock = MemoryWrapper()
-
-    # 2. Semantic Search (Pinecone natively applies the Spoiler Shield via metadata!)
     raw_results = semantic_search(
         query=req.query,
         book_id=req.book_id,
@@ -125,15 +109,13 @@ def query_book(req: QueryRequest):
         top_k=3
     )
 
-    # 3. Extract chunks
     chunks_text = [chunk for _, chunk, _ in raw_results]
     sources = [source for source, _, _ in raw_results]
 
     if not chunks_text:
         return {"answer": "I couldn't find anything about that in the book up to this chapter.", "sources": []}
 
-    # 4. Answer & Log
-    answer = generate_answer(req.query, chunks_text, memory=memory_mock)
+    answer = generate_answer(req.query, chunks_text, memory=MemoryWrapper())
 
     database.log_message(req.user_id, req.book_id, "user", req.query, req.chapter_limit)
     database.log_message(req.user_id, req.book_id, "bot", answer, req.chapter_limit)
