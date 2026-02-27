@@ -1,7 +1,7 @@
 import os
 import shutil
 import uuid
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Header
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Header, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional
 from dotenv import load_dotenv
@@ -39,8 +39,15 @@ def startup_event():
 # ── Request / Response Models ─────────────────────────────────────────────────
 class IngestResponse(BaseModel):
     message: str
-    book_id: str
-    title: str
+    job_id: str          # ← now returns a job_id, not a book_id directly
+    status: str
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    book_id: Optional[str]
+    filename: str
+    status: str          # pending | processing | done | failed
+    error: Optional[str]
 
 class QueryRequest(BaseModel):
     user_id: str
@@ -61,6 +68,36 @@ class DeleteResponse(BaseModel):
     message: str
     book_id: str
 
+# ── Background Worker ─────────────────────────────────────────────────────────
+def _run_ingest(job_id: str, pdf_path: str, original_filename: str, safe_filename: str):
+    """
+    Runs in the background after the HTTP response has already been sent.
+    Handles the full ingest pipeline and updates job status throughout.
+    """
+    try:
+        database.update_job(job_id, status="processing")
+
+        book_id = database.register_book(
+            title=original_filename,
+            filename=safe_filename,
+            index_path="supabase-pgvector"
+        )
+
+        database.update_job(job_id, status="processing", book_id=book_id)
+
+        process_and_ingest_pdf(pdf_path, book_id)
+
+        database.update_job(job_id, status="done", book_id=book_id)
+        print(f"✅ Job {job_id} complete — book_id: {book_id}")
+
+    except Exception as e:
+        database.update_job(job_id, status="failed", error=str(e))
+        print(f"❌ Job {job_id} failed: {e}")
+    finally:
+        # Always clean up the temp PDF, even if processing failed
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+
 # ── Public Endpoints ──────────────────────────────────────────────────────────
 @app.get("/health")
 def health_check():
@@ -74,56 +111,64 @@ def list_books(db: Session = Depends(database.get_db)):
 
 
 @app.post("/v1/ingest", response_model=IngestResponse, dependencies=[Depends(verify_api_key)])
-def ingest_book(file: UploadFile = File(...)):
+def ingest_book(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
     safe_filename = file.filename.replace(" ", "_")
 
     # ── Duplicate protection ──────────────────────────────────────────────────
     if database.book_exists_by_filename(safe_filename):
         raise HTTPException(
-            status_code=409,   # 409 Conflict — the right HTTP code for "already exists"
-            detail=f"A book with filename '{safe_filename}' has already been ingested. "
-                   f"Delete it first via DELETE /v1/books/<book_id> before re-uploading."
+            status_code=409,
+            detail=f"A book with filename '{safe_filename}' already exists. "
+                   f"Delete it first via DELETE /v1/books/<book_id>."
         )
 
+    # ── Save PDF to /tmp immediately (before returning) ──────────────────────
     pdf_path = f"/tmp/temp_{uuid.uuid4().hex[:8]}.pdf"
-
     with open(pdf_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    print(f"⚙️ Processing Book ({safe_filename})...")
+    # ── Create job record ─────────────────────────────────────────────────────
+    job_id = uuid.uuid4().hex[:12]
+    database.create_job(job_id, safe_filename)
 
-    try:
-        book_id = database.register_book(
-            title=file.filename,
-            filename=safe_filename,
-            index_path="supabase-pgvector"
-        )
-        process_and_ingest_pdf(pdf_path, book_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
-    finally:
-        if os.path.exists(pdf_path):
-            os.remove(pdf_path)
+    # ── Schedule background processing — response returns NOW ─────────────────
+    background_tasks.add_task(
+        _run_ingest,
+        job_id=job_id,
+        pdf_path=pdf_path,
+        original_filename=file.filename,
+        safe_filename=safe_filename
+    )
 
-    return {"message": "Book processed and stored in Supabase pgvector", "book_id": book_id, "title": file.filename}
+    print(f"📋 Job {job_id} queued for '{safe_filename}' — returning immediately.")
+
+    # ← This returns to the Android app in < 1 second
+    return {
+        "message": "Book upload received. Processing in background.",
+        "job_id": job_id,
+        "status": "pending"
+    }
+
+
+@app.get("/v1/jobs/{job_id}", response_model=JobStatusResponse, dependencies=[Depends(verify_api_key)])
+def get_job_status(job_id: str):
+    """
+    Poll this endpoint to check if your book has finished processing.
+    status: pending → processing → done (or failed)
+    Once status is 'done', the book_id is available to use in /v1/query.
+    """
+    job = database.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    return job
 
 
 @app.delete("/v1/books/{book_id}", response_model=DeleteResponse, dependencies=[Depends(verify_api_key)])
 def delete_book(book_id: str):
-    """
-    Permanently deletes a book and ALL its data:
-    - All vector chunks (book_chunks table)
-    - All chat history (messages table)
-    - The book record itself (books table)
-    """
+    """Permanently deletes a book and ALL its data."""
     deleted = database.delete_book(book_id)
-
     if not deleted:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Book '{book_id}' not found. Nothing was deleted."
-        )
-
+        raise HTTPException(status_code=404, detail=f"Book '{book_id}' not found.")
     return {
         "message": f"Book '{book_id}' and all its data has been permanently deleted.",
         "book_id": book_id
@@ -132,7 +177,7 @@ def delete_book(book_id: str):
 
 @app.post("/v1/query", response_model=QueryResponse, dependencies=[Depends(verify_api_key)])
 def query_book(req: QueryRequest, db: Session = Depends(database.get_db)):
-    # 1. Look up the real book title so the AI knows what it's talking about
+    # 1. Look up the real book title
     book_row = db.execute(
         text("SELECT title FROM books WHERE id = :id"),
         {"id": req.book_id}
@@ -149,7 +194,7 @@ def query_book(req: QueryRequest, db: Session = Depends(database.get_db)):
     class MemoryWrapper:
         def get_context(self, limit=6): return history
 
-    # 3. Semantic search (Spoiler Shield applied inside)
+    # 3. Semantic search
     raw_results = semantic_search(
         query=req.query,
         book_id=req.book_id,
@@ -163,7 +208,7 @@ def query_book(req: QueryRequest, db: Session = Depends(database.get_db)):
     if not chunks_text:
         return {"answer": "I couldn't find anything about that in the book up to this chapter.", "sources": []}
 
-    # 4. Generate answer with real book title
+    # 4. Generate answer
     answer = generate_answer(
         query=req.query,
         context_chunks=chunks_text,

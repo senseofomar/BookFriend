@@ -24,12 +24,9 @@ def get_db():
 
 
 def init_db():
-    # 1. Enable the pgvector extension first
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.commit()
-
-    # 2. Build the tables (books, messages, book_chunks)
     Base.metadata.create_all(bind=engine)
 
 
@@ -64,13 +61,11 @@ def book_exists_by_filename(filename: str) -> bool:
 
 def delete_book(book_id: str) -> bool:
     """
-    Deletes a book and ALL its associated data from Supabase.
-    Cleans up: book_chunks (vectors) → messages (history) → books (record).
-    Returns True if a book was deleted, False if the book_id didn't exist.
+    Deletes a book and ALL its associated data.
+    Cleans up: book_chunks → messages → books (in foreign key order).
     """
     db = SessionLocal()
     try:
-        # First check the book actually exists
         row = db.execute(
             text("SELECT id FROM books WHERE id = :id"),
             {"id": book_id}
@@ -79,23 +74,9 @@ def delete_book(book_id: str) -> bool:
         if not row:
             return False
 
-        # 1. Delete all vector chunks for this book
-        db.execute(
-            text("DELETE FROM book_chunks WHERE book_id = :id"),
-            {"id": book_id}
-        )
-
-        # 2. Delete all chat history for this book
-        db.execute(
-            text("DELETE FROM messages WHERE book_id = :id"),
-            {"id": book_id}
-        )
-
-        # 3. Delete the book record itself
-        db.execute(
-            text("DELETE FROM books WHERE id = :id"),
-            {"id": book_id}
-        )
+        db.execute(text("DELETE FROM book_chunks WHERE book_id = :id"), {"id": book_id})
+        db.execute(text("DELETE FROM messages WHERE book_id = :id"),    {"id": book_id})
+        db.execute(text("DELETE FROM books WHERE id = :id"),            {"id": book_id})
 
         db.commit()
         return True
@@ -103,6 +84,54 @@ def delete_book(book_id: str) -> bool:
         db.rollback()
         print(f"❌ Error deleting book {book_id}: {e}")
         raise
+    finally:
+        db.close()
+
+
+# ── Job Tracking ──────────────────────────────────────────────────────────────
+
+def create_job(job_id: str, filename: str):
+    """Creates a new ingest job record with status 'pending'."""
+    db = SessionLocal()
+    try:
+        db.execute(
+            text("INSERT INTO ingest_jobs (id, filename, status) VALUES (:id, :filename, 'pending')"),
+            {"id": job_id, "filename": filename}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def update_job(job_id: str, status: str, book_id: str = None, error: str = None):
+    """Updates a job's status. Called by the background worker as it progresses."""
+    db = SessionLocal()
+    try:
+        db.execute(
+            text("""
+                UPDATE ingest_jobs
+                SET status = :status,
+                    book_id = COALESCE(:book_id, book_id),
+                    error = :error,
+                    updated_at = NOW()
+                WHERE id = :id
+            """),
+            {"id": job_id, "status": status, "book_id": book_id, "error": error}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def get_job(job_id: str):
+    """Returns job info as a dict, or None if not found."""
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("SELECT id, book_id, filename, status, error, created_at, updated_at FROM ingest_jobs WHERE id = :id"),
+            {"id": job_id}
+        ).mappings().fetchone()
+        return dict(row) if row else None
     finally:
         db.close()
 
