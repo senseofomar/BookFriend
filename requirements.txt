@@ -8,3 +8,5 @@ python-multipart
 psycopg2-binary
 pgvector
 sqlalchemy
+pytest
+httpx
