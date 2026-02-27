@@ -1,6 +1,7 @@
 import os
 import shutil
 import uuid
+import tempfile
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Header, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional
@@ -123,7 +124,7 @@ def ingest_book(file: UploadFile = File(...), background_tasks: BackgroundTasks 
         )
 
     # ── Save PDF to /tmp immediately (before returning) ──────────────────────
-    pdf_path = f"/tmp/temp_{uuid.uuid4().hex[:8]}.pdf"
+    pdf_path = os.path.join(tempfile.gettempdir(), f"temp_{uuid.uuid4().hex[:8]}.pdf")
     with open(pdf_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 

@@ -15,16 +15,23 @@ os.environ.setdefault("DATABASE_URL", "postgresql://fake:fake@localhost/fake")
 os.environ.setdefault("BOOKFRIEND_API_KEY", "test-secret-key")
 os.environ.setdefault("GROQ_API_KEY", "fake-groq-key")
 
-# ── Patch database engine creation so it doesn't try to connect ──────────────
+# ── Patch DB engine creation so it doesn't try to actually connect ────────────
 with patch("sqlalchemy.create_engine"), \
      patch("database.init_db"), \
      patch("sentence_transformers.SentenceTransformer"):
     from api import app
+    import database
 
 client = TestClient(app)
 
 VALID_KEY = {"X-API-Key": "test-secret-key"}
 WRONG_KEY = {"X-API-Key": "wrong-key"}
+
+
+# ── Helper: inject a fake DB session via FastAPI's dependency override system ─
+def make_mock_db():
+    """Returns a MagicMock that acts like a SQLAlchemy session."""
+    return MagicMock()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -40,7 +47,7 @@ def test_health_check():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 2. Auth — wrong key rejected on all protected endpoints
+# 2. Auth — wrong or missing key rejected on all protected endpoints
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_books_rejects_wrong_api_key():
@@ -65,23 +72,26 @@ def test_query_rejects_wrong_api_key():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_list_books_returns_empty_list():
-    mock_db = MagicMock()
+    mock_db = make_mock_db()
     mock_db.execute.return_value.mappings.return_value.fetchall.return_value = []
 
-    with patch("database.get_db", return_value=iter([mock_db])):
-        response = client.get("/v1/books", headers=VALID_KEY)
+    # ✅ FastAPI dependency override — the correct way to inject a mock DB
+    app.dependency_overrides[database.get_db] = lambda: mock_db
+    response = client.get("/v1/books", headers=VALID_KEY)
+    app.dependency_overrides.clear()
 
     assert response.status_code == 200
     assert response.json() == []
 
 def test_list_books_returns_books():
-    mock_db = MagicMock()
+    mock_db = make_mock_db()
     mock_db.execute.return_value.mappings.return_value.fetchall.return_value = [
         {"id": "abc123", "title": "Lord of the Mysteries", "filename": "lord_of_mysteries.pdf"}
     ]
 
-    with patch("database.get_db", return_value=iter([mock_db])):
-        response = client.get("/v1/books", headers=VALID_KEY)
+    app.dependency_overrides[database.get_db] = lambda: mock_db
+    response = client.get("/v1/books", headers=VALID_KEY)
+    app.dependency_overrides.clear()
 
     assert response.status_code == 200
     books = response.json()
@@ -117,7 +127,7 @@ def test_ingest_returns_job_id_immediately():
 
     with patch("database.book_exists_by_filename", return_value=False), \
          patch("database.create_job"), \
-         patch("api._run_ingest"):   # prevent actual background work
+         patch("api._run_ingest"):
         response = client.post(
             "/v1/ingest",
             headers=VALID_KEY,
@@ -137,11 +147,8 @@ def test_ingest_returns_job_id_immediately():
 
 def test_get_job_status_pending():
     fake_job = {
-        "job_id": "abc123def456",
-        "book_id": None,
-        "filename": "my_book.pdf",
-        "status": "pending",
-        "error": None
+        "job_id": "abc123def456", "book_id": None,
+        "filename": "my_book.pdf", "status": "pending", "error": None
     }
     with patch("database.get_job", return_value=fake_job):
         response = client.get("/v1/jobs/abc123def456", headers=VALID_KEY)
@@ -152,11 +159,8 @@ def test_get_job_status_pending():
 
 def test_get_job_status_done():
     fake_job = {
-        "job_id": "abc123def456",
-        "book_id": "bookxyz1",
-        "filename": "my_book.pdf",
-        "status": "done",
-        "error": None
+        "job_id": "abc123def456", "book_id": "bookxyz1",
+        "filename": "my_book.pdf", "status": "done", "error": None
     }
     with patch("database.get_job", return_value=fake_job):
         response = client.get("/v1/jobs/abc123def456", headers=VALID_KEY)
@@ -164,20 +168,17 @@ def test_get_job_status_done():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "done"
-    assert data["book_id"] == "bookxyz1"   # ← app can now use this for /v1/query
+    assert data["book_id"] == "bookxyz1"
 
 def test_get_job_status_not_found():
     with patch("database.get_job", return_value=None):
         response = client.get("/v1/jobs/doesnotexist", headers=VALID_KEY)
-
     assert response.status_code == 404
 
 def test_get_job_status_failed():
     fake_job = {
-        "job_id": "abc123def456",
-        "book_id": None,
-        "filename": "bad_book.pdf",
-        "status": "failed",
+        "job_id": "abc123def456", "book_id": None,
+        "filename": "bad_book.pdf", "status": "failed",
         "error": "No text could be extracted from the PDF."
     }
     with patch("database.get_job", return_value=fake_job):
@@ -196,7 +197,6 @@ def test_get_job_status_failed():
 def test_delete_book_not_found():
     with patch("database.delete_book", return_value=False):
         response = client.delete("/v1/books/fakeid", headers=VALID_KEY)
-
     assert response.status_code == 404
 
 def test_delete_book_success():
@@ -214,24 +214,27 @@ def test_delete_book_success():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_query_book_not_found():
-    mock_db = MagicMock()
+    mock_db = make_mock_db()
+    # fetchone returns None → book not found → should 404
     mock_db.execute.return_value.mappings.return_value.fetchone.return_value = None
 
-    with patch("database.get_db", return_value=iter([mock_db])):
-        response = client.post(
-            "/v1/query",
-            headers=VALID_KEY,
-            json={"user_id": "u1", "book_id": "fakeid", "query": "Who is Klein?", "chapter_limit": 5}
-        )
+    app.dependency_overrides[database.get_db] = lambda: mock_db
+    response = client.post(
+        "/v1/query",
+        headers=VALID_KEY,
+        json={"user_id": "u1", "book_id": "fakeid", "query": "Who is Klein?", "chapter_limit": 5}
+    )
+    app.dependency_overrides.clear()
 
     assert response.status_code == 404
 
 def test_query_returns_answer():
-    mock_db = MagicMock()
+    mock_db = make_mock_db()
     mock_db.execute.return_value.mappings.return_value.fetchone.return_value = {"title": "Lord of the Mysteries"}
 
-    with patch("database.get_db", return_value=iter([mock_db])), \
-         patch("database.get_chat_history", return_value=[]), \
+    app.dependency_overrides[database.get_db] = lambda: mock_db
+
+    with patch("database.get_chat_history", return_value=[]), \
          patch("utils.semantic_utils.semantic_search", return_value=[
              ("chapter_1", "Klein Moretti is the protagonist.", 0.95)
          ]), \
@@ -244,17 +247,20 @@ def test_query_returns_answer():
             json={"user_id": "u1", "book_id": "abc123", "query": "Who is Klein?", "chapter_limit": 5}
         )
 
+    app.dependency_overrides.clear()
+
     assert response.status_code == 200
     data = response.json()
     assert data["answer"] == "Klein Moretti is the main character."
     assert "chapter_1" in data["sources"]
 
 def test_query_returns_fallback_when_no_chunks():
-    mock_db = MagicMock()
+    mock_db = make_mock_db()
     mock_db.execute.return_value.mappings.return_value.fetchone.return_value = {"title": "Some Book"}
 
-    with patch("database.get_db", return_value=iter([mock_db])), \
-         patch("database.get_chat_history", return_value=[]), \
+    app.dependency_overrides[database.get_db] = lambda: mock_db
+
+    with patch("database.get_chat_history", return_value=[]), \
          patch("utils.semantic_utils.semantic_search", return_value=[]):
 
         response = client.post(
@@ -262,6 +268,8 @@ def test_query_returns_fallback_when_no_chunks():
             headers=VALID_KEY,
             json={"user_id": "u1", "book_id": "abc123", "query": "What happened?", "chapter_limit": 1}
         )
+
+    app.dependency_overrides.clear()
 
     assert response.status_code == 200
     assert "couldn't find" in response.json()["answer"]
