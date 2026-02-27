@@ -57,6 +57,10 @@ class BookListResponse(BaseModel):
     title: str
     filename: str
 
+class DeleteResponse(BaseModel):
+    message: str
+    book_id: str
+
 # ── Public Endpoints ──────────────────────────────────────────────────────────
 @app.get("/health")
 def health_check():
@@ -72,6 +76,15 @@ def list_books(db: Session = Depends(database.get_db)):
 @app.post("/v1/ingest", response_model=IngestResponse, dependencies=[Depends(verify_api_key)])
 def ingest_book(file: UploadFile = File(...)):
     safe_filename = file.filename.replace(" ", "_")
+
+    # ── Duplicate protection ──────────────────────────────────────────────────
+    if database.book_exists_by_filename(safe_filename):
+        raise HTTPException(
+            status_code=409,   # 409 Conflict — the right HTTP code for "already exists"
+            detail=f"A book with filename '{safe_filename}' has already been ingested. "
+                   f"Delete it first via DELETE /v1/books/<book_id> before re-uploading."
+        )
+
     pdf_path = f"/tmp/temp_{uuid.uuid4().hex[:8]}.pdf"
 
     with open(pdf_path, "wb") as buffer:
@@ -93,6 +106,28 @@ def ingest_book(file: UploadFile = File(...)):
             os.remove(pdf_path)
 
     return {"message": "Book processed and stored in Supabase pgvector", "book_id": book_id, "title": file.filename}
+
+
+@app.delete("/v1/books/{book_id}", response_model=DeleteResponse, dependencies=[Depends(verify_api_key)])
+def delete_book(book_id: str):
+    """
+    Permanently deletes a book and ALL its data:
+    - All vector chunks (book_chunks table)
+    - All chat history (messages table)
+    - The book record itself (books table)
+    """
+    deleted = database.delete_book(book_id)
+
+    if not deleted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Book '{book_id}' not found. Nothing was deleted."
+        )
+
+    return {
+        "message": f"Book '{book_id}' and all its data has been permanently deleted.",
+        "book_id": book_id
+    }
 
 
 @app.post("/v1/query", response_model=QueryResponse, dependencies=[Depends(verify_api_key)])
@@ -128,12 +163,12 @@ def query_book(req: QueryRequest, db: Session = Depends(database.get_db)):
     if not chunks_text:
         return {"answer": "I couldn't find anything about that in the book up to this chapter.", "sources": []}
 
-    # 4. Generate answer — now passes the real book title dynamically
+    # 4. Generate answer with real book title
     answer = generate_answer(
         query=req.query,
         context_chunks=chunks_text,
         memory=MemoryWrapper(),
-        book_title=book_title        # ← the fix
+        book_title=book_title
     )
 
     # 5. Log to history

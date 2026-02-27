@@ -48,12 +48,69 @@ def register_book(title: str, filename: str, index_path: str) -> str:
     finally:
         db.close()
 
+
+def book_exists_by_filename(filename: str) -> bool:
+    """Returns True if a book with this filename has already been ingested."""
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("SELECT id FROM books WHERE filename = :filename LIMIT 1"),
+            {"filename": filename}
+        ).fetchone()
+        return row is not None
+    finally:
+        db.close()
+
+
+def delete_book(book_id: str) -> bool:
+    """
+    Deletes a book and ALL its associated data from Supabase.
+    Cleans up: book_chunks (vectors) → messages (history) → books (record).
+    Returns True if a book was deleted, False if the book_id didn't exist.
+    """
+    db = SessionLocal()
+    try:
+        # First check the book actually exists
+        row = db.execute(
+            text("SELECT id FROM books WHERE id = :id"),
+            {"id": book_id}
+        ).fetchone()
+
+        if not row:
+            return False
+
+        # 1. Delete all vector chunks for this book
+        db.execute(
+            text("DELETE FROM book_chunks WHERE book_id = :id"),
+            {"id": book_id}
+        )
+
+        # 2. Delete all chat history for this book
+        db.execute(
+            text("DELETE FROM messages WHERE book_id = :id"),
+            {"id": book_id}
+        )
+
+        # 3. Delete the book record itself
+        db.execute(
+            text("DELETE FROM books WHERE id = :id"),
+            {"id": book_id}
+        )
+
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error deleting book {book_id}: {e}")
+        raise
+    finally:
+        db.close()
+
+
 def log_message(user_id: str, book_id: str, role: str, content: str, chapter_limit: int):
     """Saves a chat message to Supabase."""
     db = SessionLocal()
     try:
-        # Note: If your messages table doesn't have a chapter_limit column,
-        # just remove it from the SQL query below.
         query = text("""
             INSERT INTO messages (user_id, book_id, role, content, chapter_limit) 
             VALUES (:uid, :bid, :role, :content, :limit)
@@ -71,6 +128,7 @@ def log_message(user_id: str, book_id: str, role: str, content: str, chapter_lim
         db.rollback()
     finally:
         db.close()
+
 
 def get_chat_history(user_id: str, book_id: str):
     """Retrieves previous messages for context."""
