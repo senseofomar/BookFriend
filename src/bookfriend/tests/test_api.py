@@ -240,7 +240,7 @@ def test_query_returns_answer():
          patch("api.semantic_search", return_value=[          # ← was utils.semantic_utils.semantic_search
              ("chapter_1", "Klein Moretti is the protagonist.", 0.95)
          ]), \
-         patch("api.generate_answer", return_value="Klein Moretti is the main character."), \  # ← was utils.answer_generator.generate_answer
+         patch("api.generate_answer", return_value="Klein Moretti is the main character."), \
          patch("database.log_message"):
 
         response = client.post(

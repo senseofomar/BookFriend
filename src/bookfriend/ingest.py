@@ -32,7 +32,7 @@ def smart_chunking(text, chunk_size=800, overlap_sentences=2):
 
 
 def process_and_ingest_pdf(pdf_path: str, book_id: str):
-    """Reads PDF, chunks it by chapter, and sends directly to Pinecone."""
+
     print(f"📖 Reading {pdf_path} into memory...")
 
     reader = PdfReader(pdf_path)
