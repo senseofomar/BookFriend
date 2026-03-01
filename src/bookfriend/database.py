@@ -1,140 +1,177 @@
-import sqlite3
+import os
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+from dotenv import load_dotenv
 import uuid
-from datetime import datetime
+from sqlalchemy import text
 
-DB_NAME = "bookfriend.db"
+load_dotenv()
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("CRITICAL: DATABASE_URL is not set.")
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
 def get_db():
-    """Connect to the database (creates it if missing)."""
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row  # Allows accessing columns by name
-    return conn
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def init_db():
-    """Create the tables if they don't exist."""
-    conn = get_db()
-    c = conn.cursor()
-
-    # 1. Users Table (Who is talking?)
-    c.execute('''
-              CREATE TABLE IF NOT EXISTS users
-              (
-                  id
-                  TEXT
-                  PRIMARY
-                  KEY,
-                  username
-                  TEXT,
-                  created_at
-                  TEXT
-              )
-              ''')
-
-    # 2. Books Table (What are they reading?)
-    c.execute('''
-              CREATE TABLE IF NOT EXISTS books
-              (
-                  id
-                  TEXT
-                  PRIMARY
-                  KEY,
-                  title
-                  TEXT,
-                  filename
-                  TEXT,
-                  index_path
-                  TEXT,
-                  processed_at
-                  TEXT
-              )
-              ''')
-
-    # 3. Chat History (Context for the AI)
-    c.execute('''
-              CREATE TABLE IF NOT EXISTS messages
-              (
-                  id
-                  INTEGER
-                  PRIMARY
-                  KEY
-                  AUTOINCREMENT,
-                  user_id
-                  TEXT,
-                  book_id
-                  TEXT,
-                  sender
-                  TEXT, -- 'user' or 'bot'
-                  content
-                  TEXT,
-                  chapter_limit
-                  INTEGER,
-                  timestamp
-                  TEXT,
-                  FOREIGN
-                  KEY
-              (
-                  user_id
-              ) REFERENCES users
-              (
-                  id
-              ),
-                  FOREIGN KEY
-              (
-                  book_id
-              ) REFERENCES books
-              (
-                  id
-              )
-                  )
-              ''')
-
-    conn.commit()
-    conn.close()
-    print("✅ Database initialized (Tables: users, books, messages).")
+    with engine.connect() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.commit()
+    Base.metadata.create_all(bind=engine)
 
 
-# === Helper Functions for the API ===
-
-def register_book(title, filename, index_path):
-    """Save a new book's metadata."""
-    conn = get_db()
-    book_id = str(uuid.uuid4())[:8]  # Short ID like 'a1b2c3d4'
-    conn.execute(
-        "INSERT INTO books (id, title, filename, index_path, processed_at) VALUES (?, ?, ?, ?, ?)",
-        (book_id, title, filename, index_path, datetime.now().isoformat())
-    )
-    conn.commit()
-    conn.close()
-    return book_id
-
-
-def log_message(user_id, book_id, sender, content, chapter_limit=0):
-    """Save a chat message to history."""
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO messages (user_id, book_id, sender, content, chapter_limit, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-        (user_id, book_id, sender, content, chapter_limit, datetime.now().isoformat())
-    )
-    conn.commit()
-    conn.close()
+def register_book(title: str, filename: str, index_path: str) -> str:
+    """Saves a new book entry to Supabase and returns the generated ID."""
+    db = SessionLocal()
+    book_id = uuid.uuid4().hex[:8]
+    try:
+        query = text("""
+            INSERT INTO books (id, title, filename, index_path) 
+            VALUES (:id, :title, :filename, :index_path)
+        """)
+        db.execute(query, {"id": book_id, "title": title, "filename": filename, "index_path": index_path})
+        db.commit()
+        return book_id
+    finally:
+        db.close()
 
 
-def get_chat_history(user_id, book_id, limit=6):
-    """Retrieve recent context for the AI."""
-    conn = get_db()
-    cursor = conn.execute('''
-                          SELECT sender, content
-                          FROM messages
-                          WHERE user_id = ?
-                            AND book_id = ?
-                          ORDER BY id DESC LIMIT ?
-                          ''', (user_id, book_id, limit))
+def book_exists_by_filename(filename: str) -> bool:
+    """Returns True if a book with this filename has already been ingested."""
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("SELECT id FROM books WHERE filename = :filename LIMIT 1"),
+            {"filename": filename}
+        ).fetchone()
+        return row is not None
+    finally:
+        db.close()
 
-    rows = cursor.fetchall()
-    conn.close()
 
-    # Return in reverse order (chronological) for the AI
-    history = [{"role": r["sender"], "content": r["content"]} for r in rows]
-    return history[::-1]
+def delete_book(book_id: str) -> bool:
+    """
+    Deletes a book and ALL its associated data.
+    Cleans up: book_chunks → messages → books (in foreign key order).
+    """
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("SELECT id FROM books WHERE id = :id"),
+            {"id": book_id}
+        ).fetchone()
+
+        if not row:
+            return False
+
+        db.execute(text("DELETE FROM book_chunks WHERE book_id = :id"), {"id": book_id})
+        db.execute(text("DELETE FROM messages WHERE book_id = :id"),    {"id": book_id})
+        db.execute(text("DELETE FROM books WHERE id = :id"),            {"id": book_id})
+
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error deleting book {book_id}: {e}")
+        raise
+    finally:
+        db.close()
+
+
+# ── Job Tracking ──────────────────────────────────────────────────────────────
+
+def create_job(job_id: str, filename: str):
+    """Creates a new ingest job record with status 'pending'."""
+    db = SessionLocal()
+    try:
+        db.execute(
+            text("INSERT INTO ingest_jobs (id, filename, status) VALUES (:id, :filename, 'pending')"),
+            {"id": job_id, "filename": filename}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def update_job(job_id: str, status: str, book_id: str = None, error: str = None):
+    """Updates a job's status. Called by the background worker as it progresses."""
+    db = SessionLocal()
+    try:
+        db.execute(
+            text("""
+                UPDATE ingest_jobs
+                SET status = :status,
+                    book_id = COALESCE(:book_id, book_id),
+                    error = :error,
+                    updated_at = NOW()
+                WHERE id = :id
+            """),
+            {"id": job_id, "status": status, "book_id": book_id, "error": error}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def get_job(job_id: str):
+    """Returns job info as a dict, or None if not found."""
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("SELECT id, book_id, filename, status, error, created_at, updated_at FROM ingest_jobs WHERE id = :id"),
+            {"id": job_id}
+        ).mappings().fetchone()
+        return dict(row) if row else None
+    finally:
+        db.close()
+
+
+def log_message(user_id: str, book_id: str, role: str, content: str, chapter_limit: int):
+    """Saves a chat message to Supabase."""
+    db = SessionLocal()
+    try:
+        query = text("""
+            INSERT INTO messages (user_id, book_id, role, content, chapter_limit) 
+            VALUES (:uid, :bid, :role, :content, :limit)
+        """)
+        db.execute(query, {
+            "uid": user_id,
+            "bid": book_id,
+            "role": role,
+            "content": content,
+            "limit": chapter_limit
+        })
+        db.commit()
+    except Exception as e:
+        print(f"Error logging message: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def get_chat_history(user_id: str, book_id: str):
+    """Retrieves previous messages for context."""
+    db = SessionLocal()
+    try:
+        query = text("""
+            SELECT role, content FROM messages 
+            WHERE user_id = :uid AND book_id = :bid 
+            ORDER BY id ASC
+        """)
+        rows = db.execute(query, {"uid": user_id, "bid": book_id}).mappings().fetchall()
+        return [{"role": r["role"], "content": r["content"]} for r in rows]
+    except Exception as e:
+        print(f"Error fetching history: {e}")
+        return []
+    finally:
+        db.close()

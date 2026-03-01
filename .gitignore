@@ -18,3 +18,11 @@ Thumbs.db
 # Ignore IDE/project configs
 .idea/
 
+# Local dev artifacts — NEVER commit these
+*.db
+*.faiss
+*.pkl
+*.pdf
+chapters_*/
+uploaded_*.pdf
+temp_*.pdf

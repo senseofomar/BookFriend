@@ -1,79 +1,60 @@
 import os
 import shutil
-import sys
-import subprocess
-from fastapi import FastAPI, HTTPException, UploadFile, File
+import uuid
+import tempfile
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Header, BackgroundTasks
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Optional
 from dotenv import load_dotenv
+from sqlalchemy.orm import Session
+from sqlalchemy import text
 
-# Load secrets
 load_dotenv()
 
-# Import core logic
-from utils.semantic_utils import load_semantic_index_from_path, semantic_search
+from utils.semantic_utils import semantic_search
 from utils.answer_generator import generate_answer
-import database  # <--- NEW: Import our DB module
+import database
+import models
+from ingest import process_and_ingest_pdf
 
-# === Setup App ===
+# ── API Key Security ──────────────────────────────────────────────────────────
+BOOKFRIEND_API_KEY = os.getenv("BOOKFRIEND_API_KEY")
+
+def verify_api_key(x_api_key: Optional[str] = Header(None)):
+    if not BOOKFRIEND_API_KEY:
+        raise HTTPException(status_code=500, detail="Server misconfiguration: BOOKFRIEND_API_KEY not set.")
+    if x_api_key != BOOKFRIEND_API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing X-API-Key header.")
+
+# ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="BookFriend API",
-    version="2.2 (Multi-book)"
+    version="3.0 (Supabase + pgvector Edition)"
 )
-
-# === Global State (Multi-Tenant Cache) ===
-class AppState:
-    # Dictionary to store multiple books: { "book_id": (index, mapping) }
-    indices: Dict[str, Any] = {}
-
-state = AppState()
-
-# === Helper: Load a specific book ===
-def load_book_index(book_id: str, index_path: str):
-    """Loads a specific book's index into memory if not already present."""
-    if book_id in state.indices:
-        return  # Already loaded
-
-    if not os.path.exists(index_path):
-        print(f"⚠️ Index missing for {book_id}")
-        return
-
-    print(f"📖 Loading Index for {book_id}...")
-    # You need to update semantic_utils.py to accept a path!
-    # (See Action 4 below. For now, we assume a helper exists)
-    try:
-        idx, mapping = load_semantic_index_from_path(index_path)
-        state.indices[book_id] = (idx, mapping)
-        print(f"✅ Loaded {book_id}")
-    except Exception as e:
-        print(f"❌ Failed to load {book_id}: {e}")
-
 
 @app.on_event("startup")
 def startup_event():
     database.init_db()
-    # Reload all registered books from DB
-    conn = database.get_db()
-    books = conn.execute("SELECT id, index_path FROM books").fetchall()
-    conn.close()
+    print("✅ Application startup complete. Connected to Supabase.")
 
-    for b in books:
-        load_book_index(b["id"], b["index_path"])
-
-# === API Models ===
-
+# ── Request / Response Models ─────────────────────────────────────────────────
 class IngestResponse(BaseModel):
     message: str
-    book_id: str
-    title: str
+    job_id: str          # ← now returns a job_id, not a book_id directly
+    status: str
 
+class JobStatusResponse(BaseModel):
+    job_id: str
+    book_id: Optional[str]
+    filename: str
+    status: str          # pending | processing | done | failed
+    error: Optional[str]
 
 class QueryRequest(BaseModel):
     user_id: str
     book_id: str
     query: str
     chapter_limit: int
-
 
 class QueryResponse(BaseModel):
     answer: str
@@ -84,111 +65,160 @@ class BookListResponse(BaseModel):
     title: str
     filename: str
 
-# === Endpoints ===
+class DeleteResponse(BaseModel):
+    message: str
+    book_id: str
 
+# ── Background Worker ─────────────────────────────────────────────────────────
+def _run_ingest(job_id: str, pdf_path: str, original_filename: str, safe_filename: str):
+    """
+    Runs in the background after the HTTP response has already been sent.
+    Handles the full ingest pipeline and updates job status throughout.
+    """
+    try:
+        database.update_job(job_id, status="processing")
+
+        book_id = database.register_book(
+            title=original_filename,
+            filename=safe_filename,
+            index_path="supabase-pgvector"
+        )
+
+        database.update_job(job_id, status="processing", book_id=book_id)
+
+        process_and_ingest_pdf(pdf_path, book_id)
+
+        database.update_job(job_id, status="done", book_id=book_id)
+        print(f"✅ Job {job_id} complete — book_id: {book_id}")
+
+    except Exception as e:
+        database.update_job(job_id, status="failed", error=str(e))
+        print(f"❌ Job {job_id} failed: {e}")
+    finally:
+        # Always clean up the temp PDF, even if processing failed
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+
+# ── Public Endpoints ──────────────────────────────────────────────────────────
 @app.get("/health")
 def health_check():
-    return {"status": "online", "db": "connected"}
+    return {"status": "online", "version": "3.0", "vector_db": "supabase-pgvector"}
+
+# ── Protected Endpoints ───────────────────────────────────────────────────────
+@app.get("/v1/books", response_model=List[BookListResponse], dependencies=[Depends(verify_api_key)])
+def list_books(db: Session = Depends(database.get_db)):
+    rows = db.execute(text("SELECT id, title, filename FROM books")).mappings().fetchall()
+    return [{"id": r["id"], "title": r["title"], "filename": r["filename"]} for r in rows]
 
 
-@app.get("/v1/books", response_model=List[BookListResponse])
-def list_books():
-    """Returns a list of all ingested books so the frontend knows what IDs to use."""
-    conn = database.get_db()
-    rows = conn.execute("SELECT id, title, filename FROM books").fetchall()
-    conn.close()
-
-    return [
-        {"id": r["id"], "title": r["title"], "filename": r["filename"]}
-        for r in rows
-    ]
-
-@app.post("/v1/ingest", response_model=IngestResponse)
-def ingest_book(file: UploadFile = File(...)):
-    # 1. Generate IDs
-    import uuid
-    process_id = str(uuid.uuid4())[:8]
-
-    # 2. SANITIZATION RESTORED: Clean the original name for the DB
-    # We strip spaces and weird chars so the DB entry is clean
+@app.post("/v1/ingest", response_model=IngestResponse, dependencies=[Depends(verify_api_key)])
+def ingest_book(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
     safe_filename = file.filename.replace(" ", "_")
 
-    # 3. Define Paths (Use process_id for disk storage to prevent overwrites)
-    pdf_path = f"upload_{process_id}.pdf"
-    chapters_dir = f"chapters_{process_id}"
-    index_path = f"index_{process_id}.faiss"
+    # ── Duplicate protection ──────────────────────────────────────────────────
+    if database.book_exists_by_filename(safe_filename):
+        raise HTTPException(
+            status_code=409,
+            detail=f"A book with filename '{safe_filename}' already exists. "
+                   f"Delete it first via DELETE /v1/books/<book_id>."
+        )
 
-    # Save to disk using the SAFE ID, not the filename
+    # ── Save PDF to /tmp immediately (before returning) ──────────────────────
+    pdf_path = os.path.join(tempfile.gettempdir(), f"temp_{uuid.uuid4().hex[:8]}.pdf")
     with open(pdf_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    print(f"⚙️ Processing Book {process_id} ({safe_filename})...")
+    # ── Create job record ─────────────────────────────────────────────────────
+    job_id = uuid.uuid4().hex[:12]
+    database.create_job(job_id, safe_filename)
 
-    try:
-        env = os.environ.copy()
-        # Pass the UUID paths to the scripts
-        subprocess.run([sys.executable, "ingest.py", pdf_path, chapters_dir], check=True, env=env)
-        subprocess.run([sys.executable, "build_index.py", chapters_dir, index_path], check=True, env=env)
-    except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f"Processing failed: {e}")
-    finally:
-        if os.path.exists(pdf_path): os.remove(pdf_path)
-
-    # 4. Register in DB
-    # Use the 'safe_filename' here so the user sees a nice name
-    book_id = database.register_book(
-        title=file.filename,  # Original title (e.g., "Lord of Mysteries.pdf")
-        filename=safe_filename,  # Cleaned filename (e.g., "Lord_of_Mysteries.pdf")
-        index_path=index_path  # Points to the UUID index file
+    # ── Schedule background processing — response returns NOW ─────────────────
+    background_tasks.add_task(
+        _run_ingest,
+        job_id=job_id,
+        pdf_path=pdf_path,
+        original_filename=file.filename,
+        safe_filename=safe_filename
     )
 
-    load_book_index(book_id, index_path)
+    print(f"📋 Job {job_id} queued for '{safe_filename}' — returning immediately.")
 
-    return {"message": "Book Processed", "book_id": book_id, "title": file.filename}
+    # ← This returns to the Android app in < 1 second
+    return {
+        "message": "Book upload received. Processing in background.",
+        "job_id": job_id,
+        "status": "pending"
+    }
 
 
-@app.post("/v1/query", response_model=QueryResponse)
-def query_book(req: QueryRequest):
-    # 1. Load Index if missing
-    if req.book_id not in state.indices:
-        conn = database.get_db()
-        row = conn.execute("SELECT index_path FROM books WHERE id = ?", (req.book_id,)).fetchone()
-        conn.close()
-        if row:
-            load_book_index(req.book_id, row["index_path"])
+@app.get("/v1/jobs/{job_id}", response_model=JobStatusResponse, dependencies=[Depends(verify_api_key)])
+def get_job_status(job_id: str):
+    """
+    Poll this endpoint to check if your book has finished processing.
+    status: pending → processing → done (or failed)
+    Once status is 'done', the book_id is available to use in /v1/query.
+    """
+    job = database.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    return job
 
-        if req.book_id not in state.indices:
-            raise HTTPException(status_code=404, detail="Book not found or not indexed.")
 
-    idx, mapping = state.indices[req.book_id]
+@app.delete("/v1/books/{book_id}", response_model=DeleteResponse, dependencies=[Depends(verify_api_key)])
+def delete_book(book_id: str):
+    """Permanently deletes a book and ALL its data."""
+    deleted = database.delete_book(book_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Book '{book_id}' not found.")
+    return {
+        "message": f"Book '{book_id}' and all its data has been permanently deleted.",
+        "book_id": book_id
+    }
 
-    # 2. History & Search
+
+@app.post("/v1/query", response_model=QueryResponse, dependencies=[Depends(verify_api_key)])
+def query_book(req: QueryRequest, db: Session = Depends(database.get_db)):
+    # 1. Look up the real book title
+    book_row = db.execute(
+        text("SELECT title FROM books WHERE id = :id"),
+        {"id": req.book_id}
+    ).mappings().fetchone()
+
+    if not book_row:
+        raise HTTPException(status_code=404, detail=f"Book '{req.book_id}' not found.")
+
+    book_title = book_row["title"]
+
+    # 2. Conversation history
     history = database.get_chat_history(req.user_id, req.book_id)
 
     class MemoryWrapper:
         def get_context(self, limit=6): return history
 
-    memory_mock = MemoryWrapper()
+    # 3. Semantic search
+    raw_results = semantic_search(
+        query=req.query,
+        book_id=req.book_id,
+        chapter_limit=req.chapter_limit,
+        top_k=3
+    )
 
-    raw_results = semantic_search(req.query, idx, mapping)
+    chunks_text = [chunk for _, chunk, _ in raw_results]
+    sources = [source for source, _, _ in raw_results]
 
-    # 3. Filter Spoilers
-    safe_results = []
-    limit = req.chapter_limit
-    for fname, chunk, _ in raw_results:
-        try:
-            chap_num = int(''.join(filter(str.isdigit, fname)))
-            if chap_num <= limit: safe_results.append((fname, chunk))
-        except:
-            safe_results.append((fname, chunk))
+    if not chunks_text:
+        return {"answer": "I couldn't find anything about that in the book up to this chapter.", "sources": []}
 
-    final_context = safe_results[:3]
-    chunks_text = [c for _, c in final_context]
+    # 4. Generate answer
+    answer = generate_answer(
+        query=req.query,
+        context_chunks=chunks_text,
+        memory=MemoryWrapper(),
+        book_title=book_title
+    )
 
-    # 4. Answer & Log
-    answer = generate_answer(req.query, chunks_text, memory=memory_mock)
-
+    # 5. Log to history
     database.log_message(req.user_id, req.book_id, "user", req.query, req.chapter_limit)
     database.log_message(req.user_id, req.book_id, "bot", answer, req.chapter_limit)
 
-    return {"answer": answer, "sources": [f for f, _ in final_context]}
+    return {"answer": answer, "sources": sources}
