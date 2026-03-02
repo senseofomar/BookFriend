@@ -2,12 +2,16 @@ import os
 import shutil
 import uuid
 import tempfile
-from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Header, BackgroundTasks
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Header, BackgroundTasks, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
 
@@ -16,6 +20,20 @@ from utils.answer_generator import generate_answer
 import database
 import models
 from ingest import process_and_ingest_pdf
+
+# ── Rate Limiter ──────────────────────────────────────────────────────────────
+# Uses user_id from the request body when available, falls back to IP address.
+# This way each individual user is limited, not the whole server.
+def get_user_id_or_ip(request: Request) -> str:
+    try:
+        body = request._json  # already parsed if available
+        if body and "user_id" in body:
+            return body["user_id"]
+    except Exception:
+        pass
+    return get_remote_address(request)
+
+limiter = Limiter(key_func=get_user_id_or_ip)
 
 # ── API Key Security ──────────────────────────────────────────────────────────
 BOOKFRIEND_API_KEY = os.getenv("BOOKFRIEND_API_KEY")
@@ -26,21 +44,30 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
     if x_api_key != BOOKFRIEND_API_KEY:
         raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing X-API-Key header.")
 
+# ── Lifespan (replaces deprecated @app.on_event) ─────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    database.init_db()
+    print("✅ Application startup complete. Connected to Supabase.")
+    yield
+    # Shutdown (nothing needed here)
+
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="BookFriend API",
-    version="3.0 (Supabase + pgvector Edition)"
+    version="3.1",
+    lifespan=lifespan
 )
 
-@app.on_event("startup")
-def startup_event():
-    database.init_db()
-    print("✅ Application startup complete. Connected to Supabase.")
+# Attach rate limiter to app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── Request / Response Models ─────────────────────────────────────────────────
 class IngestResponse(BaseModel):
     message: str
-    job_id: str          # ← now returns a job_id, not a book_id directly
+    job_id: str
     status: str
 
 class JobStatusResponse(BaseModel):
@@ -69,6 +96,10 @@ class DeleteResponse(BaseModel):
     message: str
     book_id: str
 
+class UserResponse(BaseModel):
+    user_id: str
+    message: str
+
 # ── Background Worker ─────────────────────────────────────────────────────────
 def _run_ingest(job_id: str, pdf_path: str, original_filename: str, safe_filename: str):
     """
@@ -83,7 +114,6 @@ def _run_ingest(job_id: str, pdf_path: str, original_filename: str, safe_filenam
             filename=safe_filename,
             index_path="supabase-pgvector"
         )
-
         database.update_job(job_id, status="processing", book_id=book_id)
 
         process_and_ingest_pdf(pdf_path, book_id)
@@ -95,14 +125,27 @@ def _run_ingest(job_id: str, pdf_path: str, original_filename: str, safe_filenam
         database.update_job(job_id, status="failed", error=str(e))
         print(f"❌ Job {job_id} failed: {e}")
     finally:
-        # Always clean up the temp PDF, even if processing failed
         if os.path.exists(pdf_path):
             os.remove(pdf_path)
 
 # ── Public Endpoints ──────────────────────────────────────────────────────────
 @app.get("/health")
 def health_check():
-    return {"status": "online", "version": "3.0", "vector_db": "supabase-pgvector"}
+    return {"status": "online", "version": "3.1", "vector_db": "supabase-pgvector"}
+
+
+@app.post("/v1/users", response_model=UserResponse)
+def register_user():
+    """
+    Creates a new user and returns their user_id.
+    The Android app calls this once on first launch and stores the user_id locally.
+    No personal data needed — fully anonymous.
+    """
+    user_id = database.create_user()
+    return {
+        "user_id": user_id,
+        "message": "User registered successfully. Store this user_id — it identifies you."
+    }
 
 # ── Protected Endpoints ───────────────────────────────────────────────────────
 @app.get("/v1/books", response_model=List[BookListResponse], dependencies=[Depends(verify_api_key)])
@@ -123,16 +166,13 @@ def ingest_book(file: UploadFile = File(...), background_tasks: BackgroundTasks 
                    f"Delete it first via DELETE /v1/books/<book_id>."
         )
 
-    # ── Save PDF to /tmp immediately (before returning) ──────────────────────
     pdf_path = os.path.join(tempfile.gettempdir(), f"temp_{uuid.uuid4().hex[:8]}.pdf")
     with open(pdf_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # ── Create job record ─────────────────────────────────────────────────────
     job_id = uuid.uuid4().hex[:12]
     database.create_job(job_id, safe_filename)
 
-    # ── Schedule background processing — response returns NOW ─────────────────
     background_tasks.add_task(
         _run_ingest,
         job_id=job_id,
@@ -142,8 +182,6 @@ def ingest_book(file: UploadFile = File(...), background_tasks: BackgroundTasks 
     )
 
     print(f"📋 Job {job_id} queued for '{safe_filename}' — returning immediately.")
-
-    # ← This returns to the Android app in < 1 second
     return {
         "message": "Book upload received. Processing in background.",
         "job_id": job_id,
@@ -153,11 +191,8 @@ def ingest_book(file: UploadFile = File(...), background_tasks: BackgroundTasks 
 
 @app.get("/v1/jobs/{job_id}", response_model=JobStatusResponse, dependencies=[Depends(verify_api_key)])
 def get_job_status(job_id: str):
-    """
-    Poll this endpoint to check if your book has finished processing.
-    status: pending → processing → done (or failed)
-    Once status is 'done', the book_id is available to use in /v1/query.
-    """
+    """Poll this to check if your book finished processing.
+    Once status == 'done', use book_id for /v1/query."""
     job = database.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
@@ -177,8 +212,16 @@ def delete_book(book_id: str):
 
 
 @app.post("/v1/query", response_model=QueryResponse, dependencies=[Depends(verify_api_key)])
-def query_book(req: QueryRequest, db: Session = Depends(database.get_db)):
-    # 1. Look up the real book title
+@limiter.limit("20/minute")   # ← rate limit: 20 queries per minute per user_id
+def query_book(request: Request, req: QueryRequest, db: Session = Depends(database.get_db)):
+    # 1. Validate user exists
+    if not database.user_exists(req.user_id):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Unknown user_id '{req.user_id}'. Register first via POST /v1/users."
+        )
+
+    # 2. Look up the real book title
     book_row = db.execute(
         text("SELECT title FROM books WHERE id = :id"),
         {"id": req.book_id}
@@ -189,13 +232,13 @@ def query_book(req: QueryRequest, db: Session = Depends(database.get_db)):
 
     book_title = book_row["title"]
 
-    # 2. Conversation history
+    # 3. Conversation history (last 12 messages only)
     history = database.get_chat_history(req.user_id, req.book_id)
 
     class MemoryWrapper:
         def get_context(self, limit=6): return history
 
-    # 3. Semantic search
+    # 4. Semantic search (Spoiler Shield applied inside)
     raw_results = semantic_search(
         query=req.query,
         book_id=req.book_id,
@@ -209,7 +252,7 @@ def query_book(req: QueryRequest, db: Session = Depends(database.get_db)):
     if not chunks_text:
         return {"answer": "I couldn't find anything about that in the book up to this chapter.", "sources": []}
 
-    # 4. Generate answer
+    # 5. Generate answer
     answer = generate_answer(
         query=req.query,
         context_chunks=chunks_text,
@@ -217,7 +260,7 @@ def query_book(req: QueryRequest, db: Session = Depends(database.get_db)):
         book_title=book_title
     )
 
-    # 5. Log to history
+    # 6. Log to history
     database.log_message(req.user_id, req.book_id, "user", req.query, req.chapter_limit)
     database.log_message(req.user_id, req.book_id, "bot", answer, req.chapter_limit)
 
