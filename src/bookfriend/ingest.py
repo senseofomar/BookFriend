@@ -32,13 +32,12 @@ def smart_chunking(text, chunk_size=800, overlap_sentences=2):
 
 
 def process_and_ingest_pdf(pdf_path: str, book_id: str):
-
+    """Reads PDF, chunks it by chapter, and upserts to Supabase pgvector."""  # ← fixed
     print(f"📖 Reading {pdf_path} into memory...")
 
     reader = PdfReader(pdf_path)
     full_text = "".join([page.extract_text() or "" for page in reader.pages])
 
-    # Try splitting by "Chapter X"
     pattern = r'(Chapter\s+\d+)'
     raw_chapters = re.split(pattern, full_text, flags=re.IGNORECASE)
 
@@ -53,16 +52,14 @@ def process_and_ingest_pdf(pdf_path: str, book_id: str):
             if len(chapter_content) < 500:
                 continue
 
-            # Extract the actual integer chapter number for Pinecone filtering
             try:
                 chap_num = int(re.search(r'\d+', chapter_title).group())
-            except:
+            except Exception:
                 chap_num = 0
 
-            # Chunk the chapter
             chunks = smart_chunking(chapter_content)
             all_chunks.extend(chunks)
-            all_chapters.extend([chap_num] * len(chunks))  # Tag every chunk with its chapter
+            all_chapters.extend([chap_num] * len(chunks))
     else:
         print("⚠️ No 'Chapter X' headings found. Saving full text as Chapter 0.")
         chunks = smart_chunking(full_text)
