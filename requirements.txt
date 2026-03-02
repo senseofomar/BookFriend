@@ -8,5 +8,6 @@ python-multipart
 psycopg2-binary
 pgvector
 sqlalchemy
+slowapi
 pytest
 httpx
