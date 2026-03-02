@@ -88,6 +88,36 @@ def delete_book(book_id: str) -> bool:
         db.close()
 
 
+# ── User Management ──────���────────────────────────────────────────────────────
+
+def create_user() -> str:
+    """Creates a new user and returns their generated user_id."""
+    db = SessionLocal()
+    user_id = uuid.uuid4().hex[:16]
+    try:
+        db.execute(
+            text("INSERT INTO users (id) VALUES (:id)"),
+            {"id": user_id}
+        )
+        db.commit()
+        return user_id
+    finally:
+        db.close()
+
+
+def user_exists(user_id: str) -> bool:
+    """Returns True if this user_id exists in the users table."""
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("SELECT id FROM users WHERE id = :id LIMIT 1"),
+            {"id": user_id}
+        ).fetchone()
+        return row is not None
+    finally:
+        db.close()
+
+
 # ── Job Tracking ──────────────────────────────────────────────────────────────
 
 def create_job(job_id: str, filename: str):
@@ -160,12 +190,20 @@ def log_message(user_id: str, book_id: str, role: str, content: str, chapter_lim
 
 
 def get_chat_history(user_id: str, book_id: str):
-    """Retrieves previous messages for context."""
+    """
+    Retrieves the last 12 messages for context.
+    LIMIT 12 = 6 user + 6 bot exchanges — enough context, prevents unbounded token burn.
+    """
     db = SessionLocal()
     try:
         query = text("""
-            SELECT role, content FROM messages 
-            WHERE user_id = :uid AND book_id = :bid 
+            SELECT role, content FROM (
+                SELECT role, content, id
+                FROM messages
+                WHERE user_id = :uid AND book_id = :bid
+                ORDER BY id DESC
+                LIMIT 12
+            ) sub
             ORDER BY id ASC
         """)
         rows = db.execute(query, {"uid": user_id, "bid": book_id}).mappings().fetchall()
