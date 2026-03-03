@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
 
 # 4. Install Python deps first (layer cache)
 WORKDIR /app
-COPY src/bookfriend/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 5. Pre-download the embedding model into the image
