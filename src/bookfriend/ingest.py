@@ -30,7 +30,6 @@ def smart_chunking(text, chunk_size=800, overlap_sentences=2):
         chunks.append(" ".join(current))
     return chunks
 
-
 def process_and_ingest_pdf(pdf_path: str, book_id: str):
     """Reads PDF, chunks it by chapter, and upserts to Supabase pgvector."""  # ← fixed
     print(f"📖 Reading {pdf_path} into memory...")

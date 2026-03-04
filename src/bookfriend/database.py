@@ -118,7 +118,7 @@ def user_exists(user_id: str) -> bool:
         db.close()
 
 
-# ── Job Tracking ──────────────────────────────────────────────────────────────
+# Job Tracking
 
 def create_job(job_id: str, filename: str):
     """Creates a new ingest job record with status 'pending'."""
