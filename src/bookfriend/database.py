@@ -166,7 +166,27 @@ def get_job(job_id: str):
         db.close()
 
 
-
+def log_message(user_id: str, book_id: str, role: str, content: str, chapter_limit: int):
+    """Saves a chat message to Supabase."""
+    db = SessionLocal()
+    try:
+        query = text("""
+            INSERT INTO messages (user_id, book_id, role, content, chapter_limit) 
+            VALUES (:uid, :bid, :role, :content, :limit)
+        """)
+        db.execute(query, {
+            "uid": user_id,
+            "bid": book_id,
+            "role": role,
+            "content": content,
+            "limit": chapter_limit
+        })
+        db.commit()
+    except Exception as e:
+        print(f"Error logging message: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
 
 def get_chat_history(user_id: str, book_id: str):
