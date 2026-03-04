@@ -118,52 +118,9 @@ def user_exists(user_id: str) -> bool:
         db.close()
 
 
-# ── Job Tracking ──────────────────────────────────────────────────────────────
-
-def create_job(job_id: str, filename: str):
-    """Creates a new ingest job record with status 'pending'."""
-    db = SessionLocal()
-    try:
-        db.execute(
-            text("INSERT INTO ingest_jobs (id, filename, status) VALUES (:id, :filename, 'pending')"),
-            {"id": job_id, "filename": filename}
-        )
-        db.commit()
-    finally:
-        db.close()
+# Job Tracking
 
 
-def update_job(job_id: str, status: str, book_id: str = None, error: str = None):
-    """Updates a job's status. Called by the background worker as it progresses."""
-    db = SessionLocal()
-    try:
-        db.execute(
-            text("""
-                UPDATE ingest_jobs
-                SET status = :status,
-                    book_id = COALESCE(:book_id, book_id),
-                    error = :error,
-                    updated_at = NOW()
-                WHERE id = :id
-            """),
-            {"id": job_id, "status": status, "book_id": book_id, "error": error}
-        )
-        db.commit()
-    finally:
-        db.close()
-
-
-def get_job(job_id: str):
-    """Returns job info as a dict, or None if not found."""
-    db = SessionLocal()
-    try:
-        row = db.execute(
-            text("SELECT id, book_id, filename, status, error, created_at, updated_at FROM ingest_jobs WHERE id = :id"),
-            {"id": job_id}
-        ).mappings().fetchone()
-        return dict(row) if row else None
-    finally:
-        db.close()
 
 
 def log_message(user_id: str, book_id: str, role: str, content: str, chapter_limit: int):
