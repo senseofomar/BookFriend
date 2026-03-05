@@ -88,7 +88,7 @@ def delete_book(book_id: str) -> bool:
         db.close()
 
 
-# ── User Management ──────���────────────────────────────────────────────────────
+# User Management
 
 def create_user() -> str:
     """Creates a new user and returns their generated user_id."""
@@ -104,7 +104,6 @@ def create_user() -> str:
     finally:
         db.close()
 
-
 def user_exists(user_id: str) -> bool:
     """Returns True if this user_id exists in the users table."""
     db = SessionLocal()
@@ -116,7 +115,6 @@ def user_exists(user_id: str) -> bool:
         return row is not None
     finally:
         db.close()
-
 
 # Job Tracking
 
