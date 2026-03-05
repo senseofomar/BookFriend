@@ -90,7 +90,19 @@ def delete_book(book_id: str) -> bool:
 
 # User Management
 
-
+def create_user() -> str:
+    """Creates a new user and returns their generated user_id."""
+    db = SessionLocal()
+    user_id = uuid.uuid4().hex[:16]
+    try:
+        db.execute(
+            text("INSERT INTO users (id) VALUES (:id)"),
+            {"id": user_id}
+        )
+        db.commit()
+        return user_id
+    finally:
+        db.close()
 
 
 def user_exists(user_id: str) -> bool:
