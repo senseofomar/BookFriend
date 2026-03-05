@@ -105,17 +105,6 @@ def create_user() -> str:
         db.close()
 
 
-def user_exists(user_id: str) -> bool:
-    """Returns True if this user_id exists in the users table."""
-    db = SessionLocal()
-    try:
-        row = db.execute(
-            text("SELECT id FROM users WHERE id = :id LIMIT 1"),
-            {"id": user_id}
-        ).fetchone()
-        return row is not None
-    finally:
-        db.close()
 
 
 # Job Tracking
