@@ -24,6 +24,5 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 COPY src/bookfriend/ .
 
 # 7. Expose port and run
-#    $PORT is injected by Render at runtime (defaults to 8000 locally)
-EXPOSE 8000
-CMD uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}
+#    $PORT is injected by Render at runtime
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "10000"]
