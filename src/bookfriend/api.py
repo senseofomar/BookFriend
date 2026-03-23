@@ -100,33 +100,7 @@ class UserResponse(BaseModel):
     user_id: str
     message: str
 
-# ── Background Worker ─────────────────────────────────────────────────────────
-def _run_ingest(job_id: str, pdf_path: str, original_filename: str, safe_filename: str):
-    """
-    Runs in the background after the HTTP response has already been sent.
-    Handles the full ingest pipeline and updates job status throughout.
-    """
-    try:
-        database.update_job(job_id, status="processing")
 
-        book_id = database.register_book(
-            title=original_filename,
-            filename=safe_filename,
-            index_path="supabase-pgvector"
-        )
-        database.update_job(job_id, status="processing", book_id=book_id)
-
-        process_and_ingest_pdf(pdf_path, book_id)
-
-        database.update_job(job_id, status="done", book_id=book_id)
-        print(f"✅ Job {job_id} complete — book_id: {book_id}")
-
-    except Exception as e:
-        database.update_job(job_id, status="failed", error=str(e))
-        print(f"❌ Job {job_id} failed: {e}")
-    finally:
-        if os.path.exists(pdf_path):
-            os.remove(pdf_path)
 
 # ── Public Endpoints ──────────────────────────────────────────────────────────
 @app.get("/health")
