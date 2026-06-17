@@ -24,6 +24,13 @@ if "books" not in st.session_state:
     st.session_state.books = []
 
 # --- Helper Functions ---
+def check_connection():
+    try:
+        response = requests.get(f"{API_URL}/", headers=HEADERS, timeout=5)
+        return response.status_code == 200
+    except Exception:
+        return False
+
 def register_user():
     try:
         response = requests.post(f"{API_URL}/v1/register", headers=HEADERS)
@@ -45,19 +52,33 @@ def fetch_books():
 # --- UI Sidebar ---
 with st.sidebar:
     st.title("📘 BookFriend")
-    st.subheader("Your AI Reading Companion")
+
+    # Connection Status
+    is_connected = check_connection()
+    if is_connected:
+        st.markdown("🟢 **System Online**")
+    else:
+        st.markdown("🔴 **System Offline**")
+        st.error(f"Cannot connect to API at {API_URL}")
+
+    st.divider()
 
     if not st.session_state.user_id:
-        if st.button("Register / New Session"):
+        if st.button("Register / New Session", disabled=not is_connected):
             register_user()
             st.rerun()
     else:
         st.success(f"User: {st.session_state.user_id[:8]}...")
+        if st.button("Debug: Show IDs"):
+            st.write(f"User ID: `{st.session_state.user_id}`")
+            if st.session_state.selected_book_id:
+                st.write(f"Book ID: `{st.session_state.selected_book_id}`")
 
     st.divider()
 
     # Book Selection
-    fetch_books()
+    if is_connected:
+        fetch_books()
     book_titles = {b["id"]: b["title"] for b in st.session_state.books}
     if book_titles:
         selected_id = st.selectbox(
