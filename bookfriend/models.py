@@ -26,7 +26,7 @@ class BookChunk(Base):
     book_id = Column(String, index=True)
     chapter_num = Column(Integer, index=True)
     chunk_text = Column(Text)
-    embedding = Column(Vector(768))
+    embedding = Column(Vector(3072))
 
 class User(Base):
     __tablename__ = "users"
