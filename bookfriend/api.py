@@ -46,7 +46,7 @@ app.add_middleware(
 )
 
 # --- Security ---
-API_KEY = os.getenv("BOOKFRIEND_API_KEY", "bookfriend_secret_key")
+API_KEY = os.getenv("BOOKFRIEND_API_KEY", "bookfriend1234567apikey")
 
 def verify_api_key(x_api_key: str = Header(None)):
     if x_api_key != API_KEY:
@@ -81,17 +81,7 @@ def bg_ingest(job_id: str, file_path: str, filename: str, book_title: str):
     try:
         database.update_job(job_id, "processing")
 
-        # Determine book_id (hex string)
-        book_id = uuid.uuid4().hex[:8]
-
-        # Save book to DB metadata
-        database.register_book(book_title, filename, "supabase")
-
-        # Find the actual book_id created (register_book returns it now in my update)
-        # Wait, my register_book in repositories.py generates its own. I'll use that.
-        # I'll update register_book to return the ID. (Done in thought)
-
-        # Re-reading repositories.py: register_book returns book_id.
+        # Save book to DB metadata and get its unique ID
         actual_book_id = database.register_book(book_title, filename, "supabase")
 
         if filename.lower().endswith(".pdf"):
