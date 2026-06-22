@@ -1,0 +1,31 @@
+services:
+  # --- Backend API ---
+  - type: web
+    name: bookfriend-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn bookfriend.api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: BOOKFRIEND_API_KEY
+        sync: false
+
+  # --- Frontend UI (Streamlit) ---
+  - type: web
+    name: bookfriend-ui
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run bookfriend/ui.py --server.port $PORT --server.address 0.0.0.0
+    envVars:
+      - key: API_URL
+        fromService:
+          name: bookfriend-api
+          type: web
+          property: host
+      - key: BOOKFRIEND_API_KEY
+        sync: false
