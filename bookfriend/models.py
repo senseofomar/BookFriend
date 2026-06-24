@@ -1,5 +1,5 @@
 from bookfriend.db.database import Base
-from sqlalchemy import Column, String, Integer, DateTime
+from sqlalchemy import Column, String, Integer, DateTime, Text
 from datetime import datetime, timezone
 from pgvector.sqlalchemy import Vector
 
@@ -8,7 +8,7 @@ class Book(Base):
     id = Column(String, primary_key=True, index=True)
     title = Column(String)
     filename = Column(String)
-    index_path = Column(String) # We will just store "supabase" here now
+    index_path = Column(String)
 
 class Message(Base):
     __tablename__ = "messages"
@@ -16,15 +16,29 @@ class Message(Base):
     user_id = Column(String, index=True)
     book_id = Column(String, index=True)
     role = Column(String)
-    content = Column(String)
+    content = Column(Text)
     chapter_limit = Column(Integer, nullable=True)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-# THE NEW VECTOR TABLE!
 class BookChunk(Base):
     __tablename__ = "book_chunks"
     id = Column(Integer, primary_key=True, autoincrement=True)
     book_id = Column(String, index=True)
     chapter_num = Column(Integer, index=True)
-    chunk_text = Column(String)
-    embedding = Column(Vector(768)) # 768 dimensions for Gemini text-embedding-004
+    chunk_text = Column(Text)
+    embedding = Column(Vector(768))
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(String, primary_key=True, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class IngestJob(Base):
+    __tablename__ = "ingest_jobs"
+    id = Column(String, primary_key=True, index=True)
+    book_id = Column(String, nullable=True)
+    filename = Column(String)
+    status = Column(String) # pending, processing, completed, failed
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
