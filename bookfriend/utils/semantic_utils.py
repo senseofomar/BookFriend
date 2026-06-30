@@ -1,45 +1,33 @@
 import os
-import google.generativeai as genai
+from google import genai
 from sqlalchemy import text
 from dotenv import load_dotenv
-from db import database
+
+# Fixed import path!
+from bookfriend.db import database
 
 load_dotenv()
 
-# Configure Gemini with environment variable
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
-EMBEDDING_MODEL = "models/text-embedding-004"
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+EMBEDDING_MODEL = "text-embedding-004"
 
 
 def get_embedding(text_str: str) -> list:
     """Generates a 768-dim vector embedding using Google Gemini API."""
-    response = genai.embed_content(
-        model=EMBEDDING_MODEL,
-        content=text_str,
-        task_type="retrieval_document"
-    )
-    return response["embedding"]
+    if not client:
+        raise ValueError("GEMINI_API_KEY is not set in environment variables.")
 
-
-def get_embeddings_batch(chunks: list) -> list:
-    """Generates embeddings for a batch of text chunks using Google Gemini API."""
-    response = genai.embed_content(
+    response = client.models.embed_content(
         model=EMBEDDING_MODEL,
-        content=chunks,
-        task_type="retrieval_document"
+        contents=text_str,
     )
-    return response["embedding"]
+    return response.embeddings[0].values
 
 
 def upsert_book_to_supabase(book_id: str, chunks: list, chapters: list):
     """Embeds chunks via Gemini API and pushes them to Supabase pgvector."""
     print(f"🚀 Preparing {len(chunks)} chunks for Supabase upload via Gemini API...")
-
-    # Fetch embeddings in batches
-    embeddings = get_embeddings_batch(chunks)
 
     db = database.SessionLocal()
     try:
@@ -48,15 +36,15 @@ def upsert_book_to_supabase(book_id: str, chunks: list, chapters: list):
             VALUES (:book_id, :chapter_num, :chunk_text, CAST(:embedding AS vector))
         """)
 
-        params = [
-            {
+        params = []
+        for chunk, chapter in zip(chunks, chapters):
+            emb = get_embedding(chunk)
+            params.append({
                 "book_id": book_id,
                 "chapter_num": chapter,
                 "chunk_text": chunk,
-                "embedding": str(emb)  # String formatted list e.g. '[0.1, 0.2, ...]'
-            }
-            for chunk, chapter, emb in zip(chunks, chapters, embeddings)
-        ]
+                "embedding": str(emb)
+            })
 
         db.execute(query, params)
         db.commit()
