@@ -1,0 +1,29 @@
+1. Is it hallucinating, when asked something out of context, if yes,
+use a constraint like provide accurate sources from the book
+
+2. When asked for an summary of the entire document, does it start with top k = 3 or 5,
+if yes, then system has failed, use retrieval agents
+This is where Retrieval Agents matter.
+Instead of a single retrieve and generate step , system becomes goal-driven.
+
+an intent-aware agent identifies whether the user wants a fact, a multi-entity answer, or a global summary.
+For full-document summarization, classic Top-K retrieval is skipped entirely.
+
+a planning agent breaks the document into logical segments
+and defines a retrieval plan that guarantees coverage across sections, chapters, or topics.
+
+An iterative retrieval agent then executes this plan,
+tracking what has already been covered and re-querying when entities, themes, or sections are missing. This prevents partial answers that look correct but are fundamentally incomplete.
+
+Each segment is summarized independently using a map step.
+These partial summaries are then combined using a reduce step into a single coherent answer that fits the model’s context window.
+
+Finally, a verification agent checks for completeness.
+If key topics or entities are under-represented, the system retrieves again before responding.
+
+This is the difference between a demo RAG system and a production grade system.
+
+
+**Make a question answer bot that answers the most frequently asked questions by searching a knowledge base
+of documentation and providing relevant responses, we can use azure QnA maker service for this, like stuff like
+how to upload a pdf on bookfriend or questions like these
