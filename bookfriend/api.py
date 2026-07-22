@@ -15,11 +15,10 @@ from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
 
-from utils.semantic_utils import semantic_search
-from utils.answer_generator import generate_answer
-import database
-import models
-from ingest import process_and_ingest_pdf
+from bookfriend.utils.semantic_utils import semantic_search
+from bookfriend.utils.answer_generator import generate_answer
+from db import database
+from bookfriend.ingest import process_and_ingest_pdf
 
 # ── Rate Limiter ──────────────────────────────────────────────────────────────
 # Uses user_id from the request body when available, falls back to IP address.
