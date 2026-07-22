@@ -18,7 +18,7 @@ load_dotenv()
 
 from bookfriend.utils.semantic_utils import semantic_search
 from bookfriend.utils.answer_generator import generate_answer
-from db import database
+from bookfriend.db import database
 from bookfriend.ingest import process_and_ingest_pdf
 
 # ── Rate Limiter ──────────────────────────────────────────────────────────────

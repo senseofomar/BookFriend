@@ -2,7 +2,6 @@ import re
 from pypdf import PdfReader
 from bookfriend.utils.semantic_utils import upsert_book_to_supabase
 
-
 def smart_chunking(text, chunk_size=800, overlap_sentences=2):
     """Sentence-safe chunking with bounded size and semantic overlap."""
     sentences = re.split(r'(?<=[.!?])\s+', text)
