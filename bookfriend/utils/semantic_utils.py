@@ -1,30 +1,51 @@
-from sentence_transformers import SentenceTransformer
+import os
+import google.generativeai as genai
 from sqlalchemy import text
 from dotenv import load_dotenv
 from db import database
 
 load_dotenv()
 
-print("🧠 Loading embedding model...")
-SEM_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+# Configure Gemini with environment variable
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+
+EMBEDDING_MODEL = "models/text-embedding-004"
+
+
+def get_embedding(text_str: str) -> list:
+    """Generates a 768-dim vector embedding using Google Gemini API."""
+    response = genai.embed_content(
+        model=EMBEDDING_MODEL,
+        content=text_str,
+        task_type="retrieval_document"
+    )
+    return response["embedding"]
+
+
+def get_embeddings_batch(chunks: list) -> list:
+    """Generates embeddings for a batch of text chunks using Google Gemini API."""
+    response = genai.embed_content(
+        model=EMBEDDING_MODEL,
+        content=chunks,
+        task_type="retrieval_document"
+    )
+    return response["embedding"]
 
 
 def upsert_book_to_supabase(book_id: str, chunks: list, chapters: list):
-    """Embeds chunks and pushes them directly to Supabase pgvector."""
-    print(f"🚀 Preparing {len(chunks)} chunks for Supabase upload...")
+    """Embeds chunks via Gemini API and pushes them to Supabase pgvector."""
+    print(f"🚀 Preparing {len(chunks)} chunks for Supabase upload via Gemini API...")
 
-    embeddings = SEM_MODEL.encode(
-        chunks,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-        show_progress_bar=True
-    ).tolist()   # list of lists — each inner list is a Python float[]
+    # Fetch embeddings in batches
+    embeddings = get_embeddings_batch(chunks)
 
     db = database.SessionLocal()
     try:
         query = text("""
             INSERT INTO book_chunks (book_id, chapter_num, chunk_text, embedding)
-            VALUES (:book_id, :chapter_num, :chunk_text, :embedding)
+            VALUES (:book_id, :chapter_num, :chunk_text, CAST(:embedding AS vector))
         """)
 
         params = [
@@ -32,9 +53,7 @@ def upsert_book_to_supabase(book_id: str, chunks: list, chapters: list):
                 "book_id": book_id,
                 "chapter_num": chapter,
                 "chunk_text": chunk,
-                # ✅ FIX: Pass as proper list, NOT str(emb)
-                # pgvector driver (pgvector Python package) handles list→vector type
-                "embedding": emb
+                "embedding": str(emb)  # String formatted list e.g. '[0.1, 0.2, ...]'
             }
             for chunk, chapter, emb in zip(chunks, chapters, embeddings)
         ]
@@ -52,9 +71,7 @@ def upsert_book_to_supabase(book_id: str, chunks: list, chapters: list):
 
 def semantic_search(query: str, book_id: str, chapter_limit: int = None, top_k: int = 5):
     """Queries Supabase pgvector using cosine distance with Spoiler Shield."""
-    query_vec = SEM_MODEL.encode(
-        [query], convert_to_numpy=True, normalize_embeddings=True
-    ).tolist()[0]  # ✅ FIX: list, not str
+    query_vec = get_embedding(query)
 
     db = database.SessionLocal()
     try:
@@ -69,7 +86,7 @@ def semantic_search(query: str, book_id: str, chapter_limit: int = None, top_k: 
                 LIMIT :top_k
             """)
             params = {
-                "embedding": str(query_vec),  # CAST workaround for SQLAlchemy text()
+                "embedding": str(query_vec),
                 "book_id": book_id,
                 "chapter_limit": chapter_limit,
                 "top_k": top_k

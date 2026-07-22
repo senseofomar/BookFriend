@@ -27,4 +27,4 @@ class BookChunk(Base):
     book_id = Column(String, index=True)
     chapter_num = Column(Integer, index=True)
     chunk_text = Column(String)
-    embedding = Column(Vector(384)) # 384 dimensions for all-MiniLM-L6-v2
+    embedding = Column(Vector(768)) # 768 dimensions for Gemini text-embedding-004
