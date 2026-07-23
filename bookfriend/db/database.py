@@ -1,5 +1,4 @@
 import os
-
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -11,11 +10,17 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is missing.")
 
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,
-    pool_recycle=300,
-    execution_options={"prepared_statement_cache_size": 0}
+    pool_pre_ping=True,      # Keeps connection alive
+    pool_recycle=300,        # Recycles dropped sockets
+    connect_args={
+        "sslmode": "require",
+        "connect_timeout": 10
+    }
 )
 
 SessionLocal = sessionmaker(
@@ -26,14 +31,12 @@ SessionLocal = sessionmaker(
 
 Base = declarative_base()
 
-
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
-
 
 def init_db():
     try:
