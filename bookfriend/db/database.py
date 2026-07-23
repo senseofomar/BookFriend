@@ -35,11 +35,10 @@ def get_db():
 
 
 def init_db():
-    """
-    Creates pgvector extension and ORM tables.
-    Safe to call on every startup.
-    """
-    with engine.begin() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-
-    Base.metadata.create_all(bind=engine)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        Base.metadata.create_all(bind=engine)
+        print("✅ Database initialized successfully.")
+    except Exception as e:
+        print(f"⚠️ Warning during init_db: {e}")
