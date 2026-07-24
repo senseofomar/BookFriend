@@ -1,6 +1,7 @@
 import re
 from pypdf import PdfReader
 from bookfriend.utils.semantic_utils import upsert_book_to_supabase
+from bookfriend import db as database
 
 def smart_chunking(text, chunk_size=800, overlap_sentences=2):
     """Sentence-safe chunking with bounded size and semantic overlap."""

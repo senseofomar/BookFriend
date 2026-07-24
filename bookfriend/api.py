@@ -18,7 +18,8 @@ load_dotenv()
 
 from bookfriend.utils.semantic_utils import semantic_search
 from bookfriend.utils.answer_generator import generate_answer
-from bookfriend.db import database
+# ✅ FIXED IMPORT
+from bookfriend import db as database
 from bookfriend.ingest import process_and_ingest_pdf
 
 # ── Rate Limiter ──────────────────────────────────────────────────────────────
