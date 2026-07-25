@@ -5,7 +5,7 @@ import tempfile
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, Header, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
@@ -18,7 +18,6 @@ load_dotenv()
 
 from bookfriend.utils.semantic_utils import semantic_search
 from bookfriend.utils.answer_generator import generate_answer
-# ✅ FIXED IMPORT
 from bookfriend import db as database
 from bookfriend.ingest import process_and_ingest_pdf
 
@@ -73,11 +72,15 @@ class IngestResponse(BaseModel):
     status: str
 
 class JobStatusResponse(BaseModel):
-    job_id: str
-    book_id: Optional[str]
+    # FIXED: Accepts 'id' from database dictionary and maps it to 'job_id'
+    job_id: str = Field(..., validation_alias="id")
+    book_id: Optional[str] = None
     filename: str
     status: str
-    error: Optional[str]
+    error: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
 
 class QueryRequest(BaseModel):
     user_id: str
