@@ -35,7 +35,11 @@ limiter = Limiter(key_func=get_user_id_or_ip)
 
 BOOKFRIEND_API_KEY = os.getenv("BOOKFRIEND_API_KEY")
 
-def verify_api_key(x_api_key: Optional[str] = Header(None)):
+from fastapi.security import APIKeyHeader
+
+api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
+
+def verify_api_key(x_api_key: Optional[str] = Depends(api_key_header)):
     if not BOOKFRIEND_API_KEY:
         raise HTTPException(status_code=500, detail="Server misconfiguration: BOOKFRIEND_API_KEY not set.")
     if x_api_key != BOOKFRIEND_API_KEY:
