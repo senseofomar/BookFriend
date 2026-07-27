@@ -15,23 +15,27 @@ client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 EMBEDDING_MODEL = "gemini-embedding-001"
 
 
-def get_embedding(text_str: str) -> list:
-    """Generates a 768-dim vector embedding using Google Gemini API."""
+def get_embeddings(texts: list) -> list:
+    """Generates a list of embeddings for a batch of strings."""
     if not client:
-        raise ValueError("GEMINI_API_KEY is not set in environment variables.")
+        raise ValueError("GEMINI_API_KEY is not set.")
 
-    # FIXED: Using text_str instead of undefined chunk_text variable
-    # FIXED: Using gemini-embedding-001 model string
+    # Using batch embedding capability
     response = client.models.embed_content(
         model=EMBEDDING_MODEL,
-        contents=text_str,
+        contents=texts,
     )
-    return response.embeddings[0].values
+    return [e.values for e in response.embeddings]
 
 
-def upsert_book_to_supabase(book_id: str, chunks: list, chapters: list):
-    """Embeds chunks via Gemini API and pushes them to Supabase pgvector."""
-    print(f"🚀 Preparing {len(chunks)} chunks for Supabase upload via Gemini API...")
+def get_embedding(text_str: str) -> list:
+    """Generates a single embedding."""
+    return get_embeddings([text_str])[0]
+
+
+def upsert_book_to_supabase(book_id: str, chunks: list, chapters: list, batch_size: int = 50):
+    """Embeds chunks in batches via Gemini API and pushes them to Supabase pgvector."""
+    print(f"🚀 Preparing {len(chunks)} chunks for Supabase upload (Batch size: {batch_size})...")
 
     db = database.SessionLocal()
     try:
@@ -40,19 +44,26 @@ def upsert_book_to_supabase(book_id: str, chunks: list, chapters: list):
             VALUES (:book_id, :chapter_num, :chunk_text, CAST(:embedding AS vector))
         """)
 
-        params = []
-        for chunk, chapter in zip(chunks, chapters):
-            emb = get_embedding(chunk)
-            params.append({
-                "book_id": book_id,
-                "chapter_num": chapter,
-                "chunk_text": chunk,
-                "embedding": str(emb)
-            })
+        for i in range(0, len(chunks), batch_size):
+            batch_chunks = chunks[i : i + batch_size]
+            batch_chapters = chapters[i : i + batch_size]
 
-        db.execute(query, params)
-        db.commit()
-        print(f"✅ Uploaded {len(chunks)} vectors to Supabase for book {book_id}")
+            print(f"  → Processing batch {i // batch_size + 1}/{(len(chunks) - 1) // batch_size + 1}...")
+            embeddings = get_embeddings(batch_chunks)
+
+            params = []
+            for chunk, chapter, emb in zip(batch_chunks, batch_chapters, embeddings):
+                params.append({
+                    "book_id": book_id,
+                    "chapter_num": chapter,
+                    "chunk_text": chunk,
+                    "embedding": str(emb)
+                })
+
+            db.execute(query, params)
+            db.commit()
+
+        print(f"✅ Successfully uploaded {len(chunks)} vectors to Supabase.")
     except Exception as e:
         db.rollback()
         print(f"❌ Error uploading to Supabase: {e}")
