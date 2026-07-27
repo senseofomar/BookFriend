@@ -1,4 +1,4 @@
-from db.database import Base
+from bookfriend.db.database import Base
 from sqlalchemy import Column, String, Integer, DateTime
 from datetime import datetime, timezone
 from pgvector.sqlalchemy import Vector
