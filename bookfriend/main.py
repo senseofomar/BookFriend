@@ -12,19 +12,18 @@ import sys
 load_dotenv()
 
 # === Internal Imports ===
-# (Adjusted to work locally from the bookfriend folder)
-from utils.command_router import handle_command
-from utils.context_memory import suggest_related
-from memory import ChatMemory
-from utils.collect_all_matches import collect_all_matches
-from utils.config import CASE_SENSITIVE_MODE, SESSION_PATH, MAX_HISTORY
-from utils.export_to_csv import export_to_csv
-from utils.highlight import build_keyword_color_map, CHAPTERS_FOLDER
-from utils.interactive_navigation import interactive_navigation
-from utils import session_utils
-from utils.semantic_utils import semantic_search
-from utils.answer_generator import generate_answer
-from bookfriend.api import app
+from bookfriend.utils.command_router import handle_command
+from bookfriend.utils.context_memory import suggest_related
+from bookfriend.memory import ChatMemory
+from bookfriend.utils.collect_all_matches import collect_all_matches
+from bookfriend.utils.config import CASE_SENSITIVE_MODE, SESSION_PATH, MAX_HISTORY
+from bookfriend.utils.export_to_csv import export_to_csv
+from bookfriend.utils.highlight import build_keyword_color_map, CHAPTERS_FOLDER
+from bookfriend.utils.interactive_navigation import interactive_navigation
+from bookfriend.utils import session_utils
+from bookfriend.utils.semantic_utils import semantic_search
+from bookfriend.utils.answer_generator import generate_answer, detect_intent
+from bookfriend.services.summarizer import generate_global_summary
 
 def main():
     """Main controller for bookfriend CLI."""
@@ -33,30 +32,19 @@ def main():
     session_data.setdefault("search_history", [])
     session_data.setdefault("total_search_count", 0)
     session_data.setdefault("favorites", [])
+    session_data.setdefault("current_book_id", None)
 
     # Load chapter range from session if it exists
-    chapter_range = session_data.get("chapter_range", None)
-    search_this_session = 0
-
-    # === Verify Chapter Data Directory ===
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    folder = os.path.join(script_dir, "chapters")
-    if not os.path.isdir(folder):
-        print(f"[❌ ERROR] Missing folder: {folder}")
-        print("👉 Run 'ingest.py' first!")
-        sys.exit(1)
+    chapter_range = session_data.get("chapter_range", [1, 10])
 
     # === Display Mode Info ===
     mode_label = "CASE-SENSITIVE" if CASE_SENSITIVE_MODE else "CASE-INSENSITIVE"
     print(f"\n📘 bookfriend — Multi-keyword & Semantic Search ({mode_label} mode)")
-    print("💡 Type 'q' or 'quit' to exit, 'forget' to clear memory.\n")
+    print("💡 Type 'q' or 'quit' to exit, 'forget' to clear memory.")
+    print("💡 Use 'set-book <id>' to select a book from Supabase.\n")
 
-    if session_data["search_history"]:
-        print(f"📂 Previous session loaded. {len(session_data['search_history'])} past searches available.\n")
-
-    if chapter_range:
-        print(f"🛡️ Spoiler Shield ACTIVE: Limited to Chapters {chapter_range[0]} - {chapter_range[1]}\n")
-
+    if not session_data["current_book_id"]:
+        print("⚠️ No book selected. Semantic search will be disabled until you run 'set-book <id>'.")
 
     # === Initialize Conversation Memory ===
     memory = ChatMemory(max_messages=10)
@@ -74,6 +62,12 @@ def main():
             continue
 
         # --- Handle Commands ---
+        if raw_input_val.startswith("set-book "):
+            bid = raw_input_val.split(" ", 1)[1].strip()
+            session_data["current_book_id"] = bid
+            print(f"✅ Current book set to: {bid}")
+            continue
+
         handled, chapter_range = handle_command(
             raw_input_val,
             session_data,
@@ -93,52 +87,47 @@ def main():
         # === SEMANTIC SEARCH MODE (With Spoiler Shield) ===
         # ======================================================
         if raw_input_val.startswith("semantic:"):
-            if not semantic_index:
-                print("❌ Semantic index is missing. Cannot perform AI search.")
+            book_id = session_data["current_book_id"]
+            if not book_id:
+                print("❌ No book selected. Use 'set-book <id>' first.")
                 continue
 
             query = raw_input_val.split("semantic:", 1)[1].strip()
 
-            # 1. Retrieve MORE results than needed (to allow filtering)
-            raw_results = semantic_search(query, semantic_index, semantic_mapping, top_k=50)
+            # 1. Intent Detection
+            intent = detect_intent(query)
+            user_max_chapter = chapter_range[1] if chapter_range else 999999
 
-            if not raw_results:
-                print("⚠️ No semantic results found.")
+            if intent == "SUMMARY":
+                print(f"🤖 Generating global summary up to Ch. {user_max_chapter}...")
+                answer = generate_global_summary(book_id, "Selected Book", user_max_chapter)
+                print(f"\n📚 Summary:\n{answer}\n")
+                memory.add("assistant", answer)
                 continue
 
-            # 2. Apply Spoiler Shield
-            user_max_chapter = chapter_range[1] if chapter_range else 999999
-            safe_results = []
-
-            for fname, chunk, dist in raw_results:
-                # Extract number from filename (e.g. "chapter_005.txt" -> 5)
-                try:
-                    chap_num = int(''.join(filter(str.isdigit, fname)))
-                    if chap_num <= user_max_chapter:
-                        safe_results.append((fname, chunk, dist))
-                except ValueError:
-                    # If no number found, keep it safe
-                    safe_results.append((fname, chunk, dist))
-
-            # 3. Take Top 5 SAFE results
-            final_results = safe_results[:5]
+            # 2. Semantic Search
+            print(f"🤔 Searching Supabase for: '{query}' (Limit: Ch. {user_max_chapter})...")
+            final_results = semantic_search(
+                query=query,
+                book_id=book_id,
+                chapter_limit=user_max_chapter,
+                top_k=5
+            )
 
             if not final_results:
-                print(f"🔒 Spoiler Shield Active! Found matches, but ALL were beyond Chapter {user_max_chapter}.")
-                print("👉 Try increasing your range with 'set-range'.")
+                print(f"🔒 Spoiler Shield Active or No Matches found up to Chapter {user_max_chapter}.")
                 continue
 
-            print(f"\n🔎 Top Semantic Matches (Filtered to Ch. {user_max_chapter}):\n")
+            print(f"\n🔎 Top Semantic Matches:\n")
             for fname, chunk, dist in final_results:
-                print(f"[{fname}] (score={dist:.2f}) → {chunk[:200]}...\n")
+                print(f"[{fname}] (score={dist:.2f}) → {chunk[:150]}...\n")
 
             # --- Generate Answer ---
-            top_chunks = [chunk for _, chunk, _ in final_results[:3]]
-            print("\n🤖 bookfriend’s Interpretation:\n")
-            print("🤔 Thinking...\n")
+            top_chunks = [chunk for _, chunk, _ in final_results]
+            print("\n🤖 Thinking...\n")
 
             try:
-                answer = generate_answer(query, top_chunks, memory=memory)
+                answer = generate_answer(query, top_chunks, memory=memory, book_title="the book")
                 memory.add("assistant", answer)
                 print(answer)
                 print("\n✅ Done.\n")
@@ -148,29 +137,13 @@ def main():
             continue
 
         # ======================================================
-        # === KEYWORD SEARCH MODE ===
+        # === KEYWORD SEARCH MODE (Local) ===
         # ======================================================
         keywords = [k.strip() for k in raw_input_val.split(",") if k.strip()]
         if not keywords:
-            print("⚠️ Please enter at least one keyword.")
             continue
 
-        mode = input("📂 Search in (a)ll chapters or (s)pecific? [a/s]: ").strip().lower()
-        chapter_filter = None
-        if mode == "s":
-            chapter_filter = input("Enter part of chapter filename: ").strip() or None
-
-        related = suggest_related(session_data, keywords)
-        if related:
-            print(f"💡 Related Past Keywords: {', '.join(related)}")
-
-        use_fuzzy = input("Enable fuzzy search? (y/n): ").strip().lower() in ("y", "yes")
-
-        session_data["total_search_count"] += 1
-        session_data["search_history"].append((keywords, chapter_filter, use_fuzzy))
-        if len(session_data["search_history"]) > MAX_HISTORY:
-            session_data["search_history"].pop(0)
-
+        print("📂 Local Keyword Search (Requires 'chapters/' folder)")
         # Restrict to Chapter Range
         valid_range = range(chapter_range[0], chapter_range[1] + 1) if chapter_range else None
 
@@ -178,13 +151,13 @@ def main():
             CHAPTERS_FOLDER,
             keywords,
             case_sensitive=CASE_SENSITIVE_MODE,
-            fuzzy=use_fuzzy,
-            chapter_filter=chapter_filter,
+            fuzzy=False,
+            chapter_filter=None,
             valid_range=valid_range
         )
 
         if not matches:
-            print("⚠️ No matches found.")
+            print("⚠️ No matches found in local chapters.")
             continue
 
         kw_color_map = build_keyword_color_map(keywords)
