@@ -3,14 +3,16 @@ from google import genai
 from sqlalchemy import text
 from dotenv import load_dotenv
 
-# Fixed import path!
+# Fixed import path
 from bookfriend.db import database
 
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-EMBEDDING_MODEL = "text-embedding-004"
+
+# Recommended model identifier for google-genai SDK
+EMBEDDING_MODEL = "gemini-embedding-001"
 
 
 def get_embedding(text_str: str) -> list:
@@ -18,6 +20,8 @@ def get_embedding(text_str: str) -> list:
     if not client:
         raise ValueError("GEMINI_API_KEY is not set in environment variables.")
 
+    # FIXED: Using text_str instead of undefined chunk_text variable
+    # FIXED: Using gemini-embedding-001 model string
     response = client.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=text_str,
