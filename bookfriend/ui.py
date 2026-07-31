@@ -28,7 +28,8 @@ def check_connection():
     try:
         response = requests.get(f"{API_URL}/", headers=HEADERS, timeout=5)
         return response.status_code == 200
-    except Exception:
+    except Exception as e:
+        # st.sidebar.error(f"Connection error: {e}") # Debugging
         return False
 
 def register_user():

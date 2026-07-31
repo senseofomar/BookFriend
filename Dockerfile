@@ -1,26 +1,38 @@
-# 1. Base image
+# Use Python 3.10 slim for a smaller image
 FROM python:3.10-slim
 
-# 2. Env setup
+# Prevent Python from writing .pyc files and enable unbuffered logging
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
-# 3. System dependencies
+# Install system dependencies for PostgreSQL and building packages
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 4. Working directory
+# Set the working directory
 WORKDIR /app
 
-# 5. Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Create a non-root user (Hugging Face requirement)
+RUN useradd -m -u 1000 user
+USER user
+ENV HOME=/home/user \
+    PATH=/home/user/.local/bin:$PATH
 
-# 6. Copy source code
-COPY . .
+# Install Python dependencies
+COPY --chown=user requirements.txt .
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
 
-# 7. Expose port and run (Render uses $PORT)
-CMD ["uvicorn", "bookfriend.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Copy the rest of the application code
+COPY --chown=user . .
+
+# Set permissions for the startup script
+RUN chmod +x start.sh
+
+# Hugging Face Spaces expect the app on port 7860
+EXPOSE 7860
+
+# Run the startup script
+CMD ["./start.sh"]
