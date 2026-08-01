@@ -1,1 +1,7 @@
-[]
+[
+  {
+    "term": "RAG v0",
+    "definition": "Retrieval-Augmented Generation",
+    "added": "2026-08-01T10:00:00"
+  }
+]
