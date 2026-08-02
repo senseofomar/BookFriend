@@ -18,5 +18,10 @@
     "term": "Embedding v3",
     "definition": "A vector representation of text",
     "added": "2026-08-02T11:24:00"
+  },
+  {
+    "term": "Token v4",
+    "definition": "A piece of a word used by LLMs",
+    "added": "2026-08-02T13:24:00"
   }
 ]
