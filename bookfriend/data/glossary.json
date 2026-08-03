@@ -23,5 +23,10 @@
     "term": "Token v4",
     "definition": "A piece of a word used by LLMs",
     "added": "2026-08-02T13:24:00"
+  },
+  {
+    "term": "Context Window v5",
+    "definition": "The maximum amount of text an LLM can process at once",
+    "added": "2026-08-03T10:27:00"
   }
 ]
