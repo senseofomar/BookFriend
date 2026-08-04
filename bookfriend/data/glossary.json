@@ -48,5 +48,10 @@
     "term": "Hallucination v9",
     "definition": "When an LLM generates false information",
     "added": "2026-08-04T22:34:00"
+  },
+  {
+    "term": "Vector Database v10",
+    "definition": "A database optimized for storing and querying embeddings",
+    "added": "2026-08-05T03:34:00"
   }
 ]
