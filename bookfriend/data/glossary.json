@@ -53,5 +53,10 @@
     "term": "Vector Database v10",
     "definition": "A database optimized for storing and querying embeddings",
     "added": "2026-08-05T03:34:00"
+  },
+  {
+    "term": "Cosine Similarity v11",
+    "definition": "A metric used to measure how similar two vectors are",
+    "added": "2026-08-06T11:33:00"
   }
 ]
