@@ -88,5 +88,10 @@
     "term": "System Prompt v17",
     "definition": "Instructions given to an LLM before the user interacts with it",
     "added": "2026-08-08T15:38:00"
+  },
+  {
+    "term": "Fine-tuning v18",
+    "definition": "Training a pre-trained model on a specific dataset",
+    "added": "2026-08-09T10:55:00"
   }
 ]
