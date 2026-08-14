@@ -158,5 +158,10 @@
     "term": "Cosine Similarity v31",
     "definition": "A metric used to measure how similar two vectors are",
     "added": "2026-08-14T12:26:00"
+  },
+  {
+    "term": "Chunking v32",
+    "definition": "Splitting large texts into smaller pieces for embedding",
+    "added": "2026-08-14T15:26:00"
   }
 ]
