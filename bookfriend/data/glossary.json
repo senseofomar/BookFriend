@@ -173,5 +173,10 @@
     "term": "Inference v34",
     "definition": "The process of generating text using an LLM",
     "added": "2026-08-15T10:27:00"
+  },
+  {
+    "term": "Temperature v35",
+    "definition": "A parameter that controls the randomness of an LLM",
+    "added": "2026-08-15T16:27:00"
   }
 ]
