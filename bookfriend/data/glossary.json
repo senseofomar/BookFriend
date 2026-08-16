@@ -183,5 +183,10 @@
     "term": "Top-p v36",
     "definition": "A parameter that controls the diversity of an LLM",
     "added": "2026-08-16T09:48:00"
+  },
+  {
+    "term": "System Prompt v37",
+    "definition": "Instructions given to an LLM before the user interacts with it",
+    "added": "2026-08-16T15:48:00"
   }
 ]
