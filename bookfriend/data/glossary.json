@@ -198,5 +198,10 @@
     "term": "Overfitting v39",
     "definition": "When a model learns the training data too well and performs poorly on new data",
     "added": "2026-08-16T22:48:00"
+  },
+  {
+    "term": "RAG v40",
+    "definition": "Retrieval-Augmented Generation",
+    "added": "2026-08-18T10:04:00"
   }
 ]
