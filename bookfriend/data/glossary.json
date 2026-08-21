@@ -238,5 +238,10 @@
     "term": "Zero-shot v47",
     "definition": "Asking an LLM to perform a task without examples",
     "added": "2026-08-21T10:48:00"
+  },
+  {
+    "term": "Few-shot v48",
+    "definition": "Providing examples to an LLM before asking it a question",
+    "added": "2026-08-21T14:48:00"
   }
 ]
