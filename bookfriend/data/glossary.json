@@ -268,5 +268,10 @@
     "term": "Semantic Search v53",
     "definition": "Searching by meaning rather than exact keywords",
     "added": "2026-08-23T18:56:00"
+  },
+  {
+    "term": "Inference v54",
+    "definition": "The process of generating text using an LLM",
+    "added": "2026-08-24T10:37:00"
   }
 ]
