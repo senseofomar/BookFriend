@@ -313,5 +313,10 @@
     "term": "FAISS v62",
     "definition": "Facebook AI Similarity Search",
     "added": "2026-08-27T12:25:00"
+  },
+  {
+    "term": "Embedding v63",
+    "definition": "A vector representation of text",
+    "added": "2026-08-27T14:25:00"
   }
 ]
