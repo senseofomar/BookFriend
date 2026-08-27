@@ -308,5 +308,10 @@
     "term": "LLM v61",
     "definition": "Large Language Model",
     "added": "2026-08-27T10:25:00"
+  },
+  {
+    "term": "FAISS v62",
+    "definition": "Facebook AI Similarity Search",
+    "added": "2026-08-27T12:25:00"
   }
 ]
