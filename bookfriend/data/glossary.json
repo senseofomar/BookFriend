@@ -303,5 +303,10 @@
     "term": "RAG v60",
     "definition": "Retrieval-Augmented Generation",
     "added": "2026-08-25T21:13:00"
+  },
+  {
+    "term": "LLM v61",
+    "definition": "Large Language Model",
+    "added": "2026-08-27T10:25:00"
   }
 ]
