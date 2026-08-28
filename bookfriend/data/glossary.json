@@ -318,5 +318,10 @@
     "term": "Embedding v63",
     "definition": "A vector representation of text",
     "added": "2026-08-27T14:25:00"
+  },
+  {
+    "term": "Token v64",
+    "definition": "A piece of a word used by LLMs",
+    "added": "2026-08-28T09:33:00"
   }
 ]
