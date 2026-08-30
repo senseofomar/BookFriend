@@ -343,5 +343,10 @@
     "term": "Few-shot v68",
     "definition": "Providing examples to an LLM before asking it a question",
     "added": "2026-08-29T15:05:00"
+  },
+  {
+    "term": "Hallucination v69",
+    "definition": "When an LLM generates false information",
+    "added": "2026-08-30T09:54:00"
   }
 ]
