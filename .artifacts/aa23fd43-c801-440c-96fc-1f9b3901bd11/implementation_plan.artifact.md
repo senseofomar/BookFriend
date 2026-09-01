@@ -1,48 +1,40 @@
-# Implementation Plan: Enhancing BookFriend RAG App (Supabase & Render)
+# Implementation Plan: True Free Deployment (Streamlit Community Cloud)
 
-This plan addresses book format support, storage clarification, UI modernization, and file recovery for the BookFriend RAG application using **Supabase**, **Render**, and **Streamlit**.
+Since Hugging Face and Render have changed their free tier policies, we will use **Streamlit Community Cloud**. It is 100% free, requires **no credit card**, and only needs a GitHub account to host your app.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> **UI Choice**: Since Node.js/npm is not available in the current environment, I am proposing a **Streamlit** UI. It's built in Python, integrates perfectly with your existing code, and provides a clean "ChatGPT-style" chat interface that is easy to deploy on Render.
+> **Unified App Architecture**: Streamlit Community Cloud hosts a single Python script. To make this work, I will merge your "brain" (API logic) directly into the "face" (UI script). You will no longer need to run two separate commands.
 >
-> **Database Connectivity**: Ensure your `DATABASE_URL` in `.env` is the transaction pooler URL from Supabase (Project Settings -> Database -> Connection string -> URI -> Pooler).
+> **Secrets Management**: Instead of an `.env` file, you will paste your API keys into the "Secrets" settings on the Streamlit dashboard.
 
 ## Proposed Changes
 
-### 1. Book Format Support (EPUB)
-Currently, only PDF is supported. We will add EPUB support.
+### 1. Unified Application Logic
+We will create a single, powerful `app.py` that contains both the logic and the interface.
+*   **[NEW] [app.py](file:///D:/PycharmProjects/bookfriend/app.py)**: This will combine:
+    *   Database initialization and models.
+    *   Book ingestion (PDF/EPUB).
+    *   Semantic search and RAG answering.
+    *   The Streamlit Chat UI.
 
-#### [MODIFY] [requirements.txt](file:///D:/PycharmProjects/bookfriend/requirements.txt)
-* Add `ebooklib`, `beautifulsoup4`, and `streamlit`.
+### 2. Configuration for Streamlit
+*   **[MODIFY] [requirements.txt](file:///D:/PycharmProjects/bookfriend/requirements.txt)**: Ensure all necessary libraries for both ingestion and UI are listed.
+*   **[DELETE] [Dockerfile](file:///D:/PycharmProjects/bookfriend/Dockerfile)**, **[render.yaml](file:///D:/PycharmProjects/bookfriend/render.yaml)**, **[start.sh](file:///D:/PycharmProjects/bookfriend/start.sh)**: These are no longer needed for Streamlit Community Cloud.
 
-#### [MODIFY] [ingest.py](file:///D:/PycharmProjects/bookfriend/bookfriend/ingest.py)
-* [DONE] Implemented `process_and_ingest_epub`.
+## Deployment Steps
 
-#### [MODIFY] [api.py](file:///D:/PycharmProjects/bookfriend/bookfriend/api.py)
-* [DONE] Updated with full FastAPI implementation and `/v1/upload` support.
-
-### 2. Modern Chat UI (Streamlit)
-We will create a professional chat interface in `bookfriend/ui.py`.
-* **Features**:
-    * Sidebar for book selection and uploading new books.
-    * Chapter limit slider for "Spoiler Shield".
-    * Summary toggle for quick recaps.
-    * Persistent chat history using the backend API.
-
-### 3. Database Schema Update
-* [DONE] Updated `models.py` to include `User` and `IngestJob` tables.
-
-### 4. Summarizer Recovery
-* [DONE] Verified `summarizer.py` is present and functional.
+1.  **GitHub**: Push your code to a GitHub repository (Public or Private).
+2.  **Streamlit Share**: Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
+3.  **Deploy**:
+    *   Select your repo and the `app.py` file.
+    *   Click **"Advanced Settings"**.
+    *   **Secrets**: Paste the contents of your `.env` file here in TOML format (I will provide the exact text).
+4.  **Share**: You will get a link like `https://bookfriend.streamlit.app` to send to your friends.
 
 ## Verification Plan
 
-### Automated Tests
-*   Run ingestion tests for both PDF and EPUB files.
-*   Verify semantic search returns relevant chunks from the database.
-
 ### Manual Verification
-*   Run `streamlit run bookfriend/ui.py` locally.
-*   Test the full flow: Upload EPUB -> Select Book -> Ask Question -> Get Answer.
+*   Run `streamlit run app.py` locally to ensure the merged logic works before pushing.
+*   Verify book upload and chat functionality in the deployed environment.
