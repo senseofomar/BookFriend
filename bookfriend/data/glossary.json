@@ -378,5 +378,10 @@
     "term": "Temperature v75",
     "definition": "A parameter that controls the randomness of an LLM",
     "added": "2026-09-01T13:35:00"
+  },
+  {
+    "term": "Top-p v76",
+    "definition": "A parameter that controls the diversity of an LLM",
+    "added": "2026-09-02T09:25:00"
   }
 ]
