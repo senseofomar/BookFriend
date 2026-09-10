@@ -463,5 +463,10 @@
     "term": "Chunking v92",
     "definition": "Splitting large texts into smaller pieces for embedding",
     "added": "2026-09-09T16:35:00"
+  },
+  {
+    "term": "Semantic Search v93",
+    "definition": "Searching by meaning rather than exact keywords",
+    "added": "2026-09-10T11:26:00"
   }
 ]
