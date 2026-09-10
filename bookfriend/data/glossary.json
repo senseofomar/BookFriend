@@ -473,5 +473,10 @@
     "term": "Inference v94",
     "definition": "The process of generating text using an LLM",
     "added": "2026-09-10T16:26:00"
+  },
+  {
+    "term": "Temperature v95",
+    "definition": "A parameter that controls the randomness of an LLM",
+    "added": "2026-09-10T22:26:00"
   }
 ]
