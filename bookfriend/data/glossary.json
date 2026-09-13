@@ -493,5 +493,10 @@
     "term": "Fine-tuning v98",
     "definition": "Training a pre-trained model on a specific dataset",
     "added": "2026-09-13T09:02:00"
+  },
+  {
+    "term": "Overfitting v99",
+    "definition": "When a model learns the training data too well and performs poorly on new data",
+    "added": "2026-09-13T13:02:00"
   }
 ]
