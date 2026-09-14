@@ -503,5 +503,10 @@
     "term": "RAG v100",
     "definition": "Retrieval-Augmented Generation",
     "added": "2026-09-14T09:09:00"
+  },
+  {
+    "term": "LLM v101",
+    "definition": "Large Language Model",
+    "added": "2026-09-14T14:09:00"
   }
 ]
