@@ -533,5 +533,10 @@
     "term": "Prompt Engineering v106",
     "definition": "Crafting inputs to get desired outputs from LLMs",
     "added": "2026-09-16T21:07:00"
+  },
+  {
+    "term": "Zero-shot v107",
+    "definition": "Asking an LLM to perform a task without examples",
+    "added": "2026-09-18T10:14:00"
   }
 ]
