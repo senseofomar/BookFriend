@@ -598,5 +598,10 @@
     "term": "Overfitting v119",
     "definition": "When a model learns the training data too well and performs poorly on new data",
     "added": "2026-09-23T03:11:00"
+  },
+  {
+    "term": "RAG v120",
+    "definition": "Retrieval-Augmented Generation",
+    "added": "2026-09-24T10:23:00"
   }
 ]
