@@ -623,5 +623,10 @@
     "term": "Token v124",
     "definition": "A piece of a word used by LLMs",
     "added": "2026-09-25T14:31:00"
+  },
+  {
+    "term": "Context Window v125",
+    "definition": "The maximum amount of text an LLM can process at once",
+    "added": "2026-09-25T19:31:00"
   }
 ]
