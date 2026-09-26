@@ -628,5 +628,10 @@
     "term": "Context Window v125",
     "definition": "The maximum amount of text an LLM can process at once",
     "added": "2026-09-25T19:31:00"
+  },
+  {
+    "term": "Prompt Engineering v126",
+    "definition": "Crafting inputs to get desired outputs from LLMs",
+    "added": "2026-09-26T11:26:00"
   }
 ]
