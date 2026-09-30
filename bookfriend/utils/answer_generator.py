@@ -39,9 +39,12 @@ def generate_answer(query: str, context_chunks: list, memory, book_title: str) -
         model="llama-3.3-70b-versatile",
         messages=messages,
         temperature=0.2, # Lower temperature for more deterministic/grounded answers
+        stream=True,
     )
 
-    return completion.choices[0].message.content
+    for chunk in completion:
+        if chunk.choices[0].delta.content:
+            yield chunk.choices[0].delta.content
 
 
 def detect_intent(query: str) -> str:

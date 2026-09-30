@@ -146,12 +146,12 @@ else:
                     # 1. FAQ
                     faq_answer = get_faq_answer(prompt)
                     if faq_answer:
-                        answer = f"[FAQ] {faq_answer}"
+                        answer_output = f"[FAQ] {faq_answer}"
                     else:
                         # 2. Intent Detection
                         intent = detect_intent(prompt)
                         if intent == "SUMMARY":
-                            answer = generate_global_summary(st.session_state.selected_book_id, current_book_title, chapter_limit)
+                            answer_output = generate_global_summary(st.session_state.selected_book_id, current_book_title, chapter_limit)
                         else:
                             # 3. RAG Flow
                             class MemoryWrapper:
@@ -159,17 +159,22 @@ else:
 
                             results = semantic_search(prompt, st.session_state.selected_book_id, chapter_limit)
                             if not results:
-                                answer = "I couldn't find relevant info up to this chapter. Try increasing your chapter limit!"
+                                answer_output = "I couldn't find relevant info up to this chapter. Try increasing your chapter limit!"
                             else:
                                 chunks = [c[1] for c in results]
-                                answer = generate_answer(prompt, chunks, MemoryWrapper(), current_book_title)
+                                answer_output = generate_answer(prompt, chunks, MemoryWrapper(), current_book_title)
 
-                    st.markdown(answer)
-                    st.session_state.messages.append({"role": "assistant", "content": answer})
+                    if isinstance(answer_output, str):
+                        st.markdown(answer_output)
+                        final_answer = answer_output
+                    else:
+                        final_answer = st.write_stream(answer_output)
+
+                    st.session_state.messages.append({"role": "assistant", "content": final_answer})
 
                     # Log to DB
                     database.log_message(st.session_state.user_id, st.session_state.selected_book_id, "user", prompt, chapter_limit)
-                    database.log_message(st.session_state.user_id, st.session_state.selected_book_id, "assistant", answer, chapter_limit)
+                    database.log_message(st.session_state.user_id, st.session_state.selected_book_id, "assistant", final_answer, chapter_limit)
 
 # --- Custom Styling ---
 st.markdown("""
