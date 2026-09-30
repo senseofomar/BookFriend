@@ -329,3 +329,23 @@ def get_chat_history(user_id, book_id):
 
     finally:
         db.close()
+
+def clear_chat_history(user_id, book_id):
+    db = SessionLocal()
+    try:
+        db.execute(
+            text("""
+                DELETE FROM messages
+                WHERE user_id=:uid AND book_id=:bid
+            """),
+            {
+                "uid": user_id,
+                "bid": book_id,
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()

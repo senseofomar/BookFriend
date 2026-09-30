@@ -45,6 +45,13 @@ def get_books():
     finally:
         db.close()
 
+def export_chat_history(messages, book_title):
+    md_content = f"# Chat History: {book_title}\n\n"
+    for msg in messages:
+        role = "👤 You" if msg["role"] == "user" else "🤖 BookFriend"
+        md_content += f"### {role}\n{msg['content']}\n\n---\n\n"
+    return md_content
+
 # --- UI Sidebar ---
 with st.sidebar:
     st.title("📘 BookFriend")
@@ -81,6 +88,25 @@ with st.sidebar:
     # Settings
     st.subheader("Spoiler Shield")
     chapter_limit = st.slider("Max Chapter to Search", 0, 100, 20)
+
+    st.divider()
+
+    # Chat Management
+    st.subheader("Chat Management")
+    if st.session_state.messages and st.session_state.selected_book_id:
+        current_book_title = book_titles.get(st.session_state.selected_book_id, "Unknown Book")
+        chat_markdown = export_chat_history(st.session_state.messages, current_book_title)
+        st.download_button(
+            label="⬇️ Download Chat History",
+            data=chat_markdown,
+            file_name=f"bookfriend_chat_{current_book_title.replace(' ', '_')}.md",
+            mime="text/markdown"
+        )
+        if st.button("🗑️ Clear Chat History", type="secondary"):
+            database.clear_chat_history(st.session_state.user_id, st.session_state.selected_book_id)
+            st.session_state.messages = []
+            st.rerun()
+
 
     st.divider()
 

@@ -21,6 +21,7 @@ from .repositories import (
     get_job,
     log_message,
     get_chat_history,
+    clear_chat_history,
 )
 
 __all__ = [
@@ -43,4 +44,5 @@ __all__ = [
 
     "log_message",
     "get_chat_history",
+    "clear_chat_history",
 ]
