@@ -116,29 +116,37 @@ with st.sidebar:
     book_title_input = st.text_input("Book Title", placeholder="Enter book title...")
 
     if st.button("Ingest Book") and uploaded_file and book_title_input:
-        with st.spinner("Ingesting... This may take a minute for large books."):
-            try:
-                # Save to temp file
-                temp_dir = tempfile.gettempdir()
-                file_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_{uploaded_file.name}")
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
+        progress_text = "Ingesting... This may take a minute for large books."
+        my_bar = st.progress(0, text=progress_text)
 
-                # Register Book
-                book_id = database.register_book(book_title_input, uploaded_file.name, "supabase")
+        def update_progress(current, total):
+            percent = current / total
+            my_bar.progress(percent, text=f"Processing chunk batch {current}/{total}...")
 
-                # Ingest
-                if uploaded_file.name.lower().endswith(".pdf"):
-                    process_and_ingest_pdf(file_path, book_id)
-                else:
-                    process_and_ingest_epub(file_path, book_id)
+        try:
+            # Save to temp file
+            temp_dir = tempfile.gettempdir()
+            file_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_{uploaded_file.name}")
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
 
-                os.remove(file_path)
-                st.success(f"✅ '{book_title_input}' ingested successfully!")
-                st.session_state.selected_book_id = book_id
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Ingestion failed: {e}")
+            # Register Book
+            book_id = database.register_book(book_title_input, uploaded_file.name, "supabase")
+
+            # Ingest
+            if uploaded_file.name.lower().endswith(".pdf"):
+                process_and_ingest_pdf(file_path, book_id, progress_callback=update_progress)
+            else:
+                process_and_ingest_epub(file_path, book_id, progress_callback=update_progress)
+
+            os.remove(file_path)
+            my_bar.empty()
+            st.success(f"✅ '{book_title_input}' ingested successfully!")
+            st.session_state.selected_book_id = book_id
+            st.rerun()
+        except Exception as e:
+            my_bar.empty()
+            st.error(f"❌ Ingestion failed: {e}")
 
 # --- Main Chat Area ---
 if not st.session_state.selected_book_id:

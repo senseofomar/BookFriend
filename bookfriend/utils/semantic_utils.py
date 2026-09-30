@@ -33,7 +33,7 @@ def get_embedding(text_str: str) -> list:
     return get_embeddings([text_str])[0]
 
 
-def upsert_book_to_supabase(book_id: str, chunks: list, chapters: list, batch_size: int = 50):
+def upsert_book_to_supabase(book_id: str, chunks: list, chapters: list, batch_size: int = 50, progress_callback=None):
     """Embeds chunks in batches via Gemini API and pushes them to Supabase pgvector."""
     print(f"🚀 Preparing {len(chunks)} chunks for Supabase upload (Batch size: {batch_size})...")
 
@@ -44,11 +44,18 @@ def upsert_book_to_supabase(book_id: str, chunks: list, chapters: list, batch_si
             VALUES (:book_id, :chapter_num, :chunk_text, CAST(:embedding AS vector))
         """)
 
+        total_batches = (len(chunks) - 1) // batch_size + 1
+
         for i in range(0, len(chunks), batch_size):
             batch_chunks = chunks[i : i + batch_size]
             batch_chapters = chapters[i : i + batch_size]
 
-            print(f"  → Processing batch {i // batch_size + 1}/{(len(chunks) - 1) // batch_size + 1}...")
+            current_batch = i // batch_size + 1
+            print(f"  → Processing batch {current_batch}/{total_batches}...")
+
+            if progress_callback:
+                progress_callback(current_batch, total_batches)
+
             embeddings = get_embeddings(batch_chunks)
 
             params = []

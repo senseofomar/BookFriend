@@ -37,9 +37,10 @@ def smart_chunking(text, chunk_size=800, overlap_sentences=2):
         chunks.append(" ".join(current))
     return chunks
 
-def process_and_ingest_pdf(pdf_path: str, book_id: str):
+def process_and_ingest_pdf(pdf_path: str, book_id: str, progress_callback=None):
     """Reads PDF, chunks it by chapter, and upserts to Supabase pgvector."""
     print(f"📖 Reading PDF {pdf_path} into memory...")
+# ...
 
     reader = PdfReader(pdf_path)
     full_text = "".join([page.extract_text() or "" for page in reader.pages])
@@ -79,9 +80,9 @@ def process_and_ingest_pdf(pdf_path: str, book_id: str):
     if not all_chunks:
         raise ValueError("No text could be extracted or chunked from the PDF.")
 
-    upsert_book_to_supabase(book_id, all_chunks, all_chapters)
+    upsert_book_to_supabase(book_id, all_chunks, all_chapters, progress_callback=progress_callback)
 
-def process_and_ingest_epub(epub_path: str, book_id: str):
+def process_and_ingest_epub(epub_path: str, book_id: str, progress_callback=None):
     """Reads EPUB, extracts text by document item, and upserts to Supabase pgvector."""
     print(f"📖 Reading EPUB {epub_path} into memory...")
 
@@ -108,4 +109,4 @@ def process_and_ingest_epub(epub_path: str, book_id: str):
         raise ValueError("No text could be extracted or chunked from the EPUB.")
 
     print(f"✅ Extracted {len(all_chunks)} chunks from {chapter_count} items.")
-    upsert_book_to_supabase(book_id, all_chunks, all_chapters)
+    upsert_book_to_supabase(book_id, all_chunks, all_chapters, progress_callback=progress_callback)
