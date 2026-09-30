@@ -4,7 +4,7 @@ def main():
     path ="session.json"
 
     print("----Testing save session")
-    session_utils.save_session({"user":"omar","progress":42},path)
+    session_utils.save_session({"user": "omar", "progress":42}, path)
     print("Saved session.json")
 
     print("\n---Testing load_session---")
@@ -17,4 +17,4 @@ def main():
     print("After reset, data:", data)
 
 if __name__ == '__main__':
-    main()
+    main() 

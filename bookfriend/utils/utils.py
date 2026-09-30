@@ -1,6 +1,3 @@
-# =========================
-# FUNCTION: keyword_in_sentence
-# =========================
 import re
 
 from bookfriend.utils.config import CASE_SENSITIVE_MODE

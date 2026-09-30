@@ -136,4 +136,3 @@ def handle_command(raw_input_val, session_data, chapter_range, semantic_index, s
     # === REMOVED: Semantic Search Block ===
     # It is now handled exclusively by main.py to enable the Spoiler Shield.
 
-    return False, chapter_range

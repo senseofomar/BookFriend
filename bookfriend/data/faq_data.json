@@ -1,0 +1,22 @@
+[
+  {
+    "question": "How do I upload a book?",
+    "answer": "You can upload a book using the /v1/ingest endpoint. Send a POST request with a PDF file and your API key in the x-api-key header."
+  },
+  {
+    "question": "What is the spoiler shield?",
+    "answer": "The spoiler shield is a feature that restricts the AI from knowing or discussing anything beyond the chapter you are currently reading. You set this using the chapter_limit parameter in your query."
+  },
+  {
+    "question": "How do I get a user ID?",
+    "answer": "Call the /v1/users endpoint with a POST request. It will return a unique user_id that you should use for all subsequent queries to maintain chat history."
+  },
+  {
+    "question": "Which books are available?",
+    "answer": "You can list all ingested books by calling the /v1/books endpoint."
+  },
+  {
+    "question": "How do I clear my chat history?",
+    "answer": "Currently, chat history is tied to your user_id and book_id. To start fresh, you can register a new user ID."
+  }
+]

@@ -7,7 +7,6 @@ All external calls are mocked.
 import io
 
 import patch
-import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
@@ -22,7 +21,7 @@ with patch("sqlalchemy.create_engine"), \
      patch("database.init_db"), \
      patch("sentence_transformers.SentenceTransformer"):
     from api import app
-    import database
+    from db import database
 
 client = TestClient(app)
 
