@@ -1,7 +1,15 @@
-# Tasks: Streamlit Community Cloud Deployment
+# Tasks: BookFriend Feature Expansion
 
-- `[x]` Create unified `app.py` that calls logic functions directly (avoiding HTTP/FastAPI dependencies)
-- `[x]` Update `requirements.txt` to include all necessary dependencies for a single-process run
-- `[x]` Verify `app.py` works locally by running `streamlit run app.py`
-- `[x]` Provide "Secrets" TOML configuration for the Streamlit dashboard
-- `[x]` Finalize walkthrough with deployment instructions
+- `[x]` Task 1: Implement Real-Time Streaming Responses
+  - `[x]` Update `answer_generator.py` for streaming.
+  - `[x]` Update `app.py` to render streaming text.
+- `[x]` Task 2: Implement Chat History Export
+  - `[x]` Add Markdown export formatting in `app.py`.
+  - `[x]` Add `st.download_button` in the sidebar.
+- `[x]` Task 3: Implement Chat Management (Clear Chat)
+  - `[x]` Add `clear_chat_history` in `bookfriend/db/repositories.py`.
+  - `[x]` Add UI button in `app.py` and hook it up.
+- `[x]` Task 4: Ingestion Progress Tracking
+  - `[x]` Update `ingest.py` batching logic to support progress callbacks.
+  - `[x]` Update `app.py` to render `st.progress()`.
+- `[x]` Git commits for each feature addition.
