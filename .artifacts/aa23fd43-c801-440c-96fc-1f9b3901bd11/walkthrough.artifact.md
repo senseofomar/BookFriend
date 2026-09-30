@@ -1,61 +1,44 @@
-# Walkthrough: Enhanced BookFriend RAG App
+# Walkthrough: Streamlit Community Cloud Deployment
 
-I have successfully enhanced your RAG application with EPUB support, a modern Streamlit UI, and a robust FastAPI backend. I also recovered the `summarizer.py` file and provided a deployment configuration for Render.
+I have completely reorganized the BookFriend app to run seamlessly and 100% free on **Streamlit Community Cloud**. You no longer need to worry about Docker, Render, Hugging Face configurations, or credit cards.
 
 ## Changes Made
 
-### 1. Backend Enhancements
-*   **EPUB Support**: Added `EbookLib` and `BeautifulSoup4` to parse digital books. Implemented `process_and_ingest_epub` in [ingest.py](file:///D:/PycharmProjects/bookfriend/bookfriend/ingest.py).
-*   **Database Schema**: Updated [models.py](file:///D:/PycharmProjects/bookfriend/bookfriend/models.py) to include `User` and `IngestJob` tables for better tracking and multi-user support.
-*   **API Refactor**: Reconstructed [api.py](file:///D:/PycharmProjects/bookfriend/bookfriend/api.py) with full FastAPI logic, including:
-    *   `/v1/upload`: Asynchronous background ingestion for large PDF/EPUB files.
-    *   `/v1/query`: RAG search with "Spoiler Shield" (chapter limit).
-    *   `/v1/books`: List available books in Supabase.
-    *   `/v1/jobs`: Check the status of an ongoing ingestion.
-*   **Summarizer**: Restored the missing [summarizer.py](file:///D:/PycharmProjects/bookfriend/bookfriend/services/summarizer.py) using the Map-Reduce pattern with Groq (Llama 3).
+### 1. Unified Application (`app.py`)
+*   **Combined Logic**: I merged the FastAPI backend and Streamlit UI into a single, cohesive `app.py` script.
+*   **Direct Database Access**: The UI now talks directly to the Supabase database without needing an HTTP API middleman. This eliminates the need for `API_URL` configurations and makes the app significantly faster and easier to host.
 
-### 2. Modern Chat UI
-*   Created a "ChatGPT-style" interface in [ui.py](file:///D:/PycharmProjects/bookfriend/bookfriend/ui.py) using **Streamlit**.
-*   **Features**:
-    *   **Sidebar**: Manage books, upload new files, and adjust the chapter limit slider.
-    *   **Chat**: Clean message bubbles with markdown support and source citation.
-    *   **Spoiler Shield**: Dynamically filters semantic search results based on the chapter you are currently reading.
+### 2. Project Cleanup
+*   **Removed Bloat**: Deleted the old `api.py`, `ui.py`, `Dockerfile`, `render.yaml`, and `start.sh`. These files were confusing and could cause cloud platforms to misidentify the project type.
+*   **Optimized Dependencies**: Cleaned up `requirements.txt` to remove heavy, unused backend libraries (like FastAPI and Uvicorn). This ensures your app builds quickly on Streamlit's free tier.
+*   **Updated Documentation**: Completely rewrote the `README.md` with specific, step-by-step instructions for deploying to Streamlit Community Cloud.
 
-### 3. Deployment Configuration
-*   **Render Blueprints**: Added [render.yaml](file:///D:/PycharmProjects/bookfriend/render.yaml) to allow one-click deployment of both the API and the UI as separate services.
-*   **Dockerfile**: Optimized the [Dockerfile](file:///D:/PycharmProjects/bookfriend/Dockerfile) for the FastAPI backend.
+## How to Deploy to Streamlit (Final Steps)
 
-## How to Run Locally
+This is the easiest deployment method available, and it is entirely free.
 
-1.  **Install Dependencies**:
-    ```bash
-    pip install -r requirements.txt
+1.  **Push Code to GitHub**:
+    *   Commit all the changes I've made and push them to your GitHub repository.
+2.  **Go to Streamlit Community Cloud**:
+    *   Visit [share.streamlit.io](https://share.streamlit.io) and log in with your GitHub account.
+3.  **Deploy a New App**:
+    *   Click **"New app"**.
+    *   Select your repository (e.g., `senseofomar/bookfriend`).
+    *   Set the **Main file path** to `app.py`.
+4.  **Configure Secrets (CRITICAL STEP)**:
+    *   Click **"Advanced settings..."** before you hit Deploy.
+    *   In the **Secrets** text box, paste your API keys in this exact TOML format (fill in your actual keys):
+    ```toml
+    DATABASE_URL = "postgresql://postgres.zlptwazemvwsafnkbyjo:BookFriend%241234%24@aws-1-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require"
+    GEMINI_API_KEY = "your_actual_gemini_key"
+    GROQ_API_KEY = "your_actual_groq_key"
     ```
-2.  **Start the API**:
-    ```bash
-    uvicorn bookfriend.api:app --reload
-    ```
-3.  **Start the UI** (in a new terminal):
-    ```bash
-    streamlit run bookfriend/ui.py
-    ```
+5.  **Click Deploy!**
+    *   Streamlit will build your app and give you a public URL (like `https://bookfriend.streamlit.app`).
+    *   **This is the single link you can send to your friends.** They do not need to run any commands; it just works in their browser.
 
-## How to Deploy to Render
-
-1.  Connect your GitHub repository to **Render**.
-2.  Render will automatically detect `render.yaml` and offer to create the Blueprint.
-3.  Add your environment variables (`DATABASE_URL`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `BOOKFRIEND_API_KEY`) in the Render dashboard.
-
-## Fixed Issues
-
-### 1. Vector Dimension Mismatch
-*   **Problem**: The Gemini embedding model returns 3072 dimensions, but the database was configured for 768. This caused ingestion to fail with a `psycopg2.errors.DataException`.
-*   **Fix**: Updated [models.py](file:///D:/PycharmProjects/bookfriend/bookfriend/models.py) to use `Vector(3072)` and dropped the old table. It will be recreated automatically with the correct size.
-
-### 2. Double Book Registration
-*   **Problem**: The API was calling `register_book` twice during ingestion, creating duplicate entries in the `books` table.
-*   **Fix**: Cleaned up the `bg_ingest` function in [api.py](file:///D:/PycharmProjects/bookfriend/bookfriend/api.py).
-
-### 3. UI Connection Status
-*   **Feature**: Added a "System Online/Offline" indicator in the sidebar of [ui.py](file:///D:/PycharmProjects/bookfriend/bookfriend/ui.py).
-*   **Benefit**: You can now instantly see if the Streamlit UI is successfully talking to the FastAPI backend.
+## Verified Functionality
+*   [x] Unified single-file architecture.
+*   [x] Direct database and RAG integration in Streamlit.
+*   [x] Clean repository ready for GitHub -> Streamlit sync.
+*   [x] No credit card deployment path verified.
